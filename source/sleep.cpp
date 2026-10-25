@@ -23,16 +23,6 @@ namespace power {
         // AM returns this while it is busy; libnx's appletInitialize retries on it.
         constexpr u32 AmBusyError = 0x19280;
 
-        // Warning dim: brightness setting is multiplied by this, then restored.
-        constexpr float DimFactor = 0.2f;
-        bool g_dimmed = false;
-        float g_savedBrightness = 0.f;
-
-        Mutex &dimMutex() {
-            static Mutex mutex = 0;
-            return mutex;
-        }
-
         Result startSleepViaLibnx() {
             // libtesla sets __nx_applet_type = AppletType_None, so this session is
             // normally not initialised. Kept in case a host ever provides one.
@@ -204,37 +194,6 @@ namespace power {
         if (used)
             *used = path;
         return rc;
-    }
-
-    void beginDim() {
-        Mutex &lock = dimMutex();
-        mutexLock(&lock);
-
-        if (!g_dimmed && R_SUCCEEDED(lblInitialize())) {
-            float current = 0.f;
-            if (R_SUCCEEDED(lblGetCurrentBrightnessSetting(&current)) &&
-                R_SUCCEEDED(lblSetCurrentBrightnessSetting(current * DimFactor))) {
-                g_savedBrightness = current;
-                g_dimmed = true;
-            } else {
-                lblExit();
-            }
-        }
-
-        mutexUnlock(&lock);
-    }
-
-    void endDim() {
-        Mutex &lock = dimMutex();
-        mutexLock(&lock);
-
-        if (g_dimmed) {
-            lblSetCurrentBrightnessSetting(g_savedBrightness);
-            lblExit();
-            g_dimmed = false;
-        }
-
-        mutexUnlock(&lock);
     }
 
     const char *pathName(SleepPath path) {

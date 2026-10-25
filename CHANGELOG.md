@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+- The one-second dim at the start of the last minute (not noticeable enough to be useful).
+
 ## [1.0.6] - 2026-10-25
 
 ### Changed

@@ -1,4 +1,4 @@
-// Entering sleep mode and the pre-sleep warning. No UI code here.
+// Entering sleep mode. No UI code here.
 #pragma once
 
 #include <switch.h>
@@ -31,13 +31,6 @@ namespace power {
 
     // Returned when the fallback request didn't answer in time.
     Result ResultNoResponse();
-
-    // Drops the screen brightness to a fifth of the current setting without
-    // saving it. Best effort; does nothing if already dimmed.
-    void beginDim();
-    // Restores the brightness saved by beginDim(). Safe to call at any time
-    // and from any thread.
-    void endDim();
 
     const char *pathName(SleepPath path);
 

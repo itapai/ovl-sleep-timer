@@ -31,7 +31,6 @@ namespace {
     Config g_config;
     SleepTimer g_timer;
     std::atomic<power::SleepPath> g_lastPath{power::SleepPath::None};
-    std::atomic<u32> g_warningTicks{0};
 
     // Notifications from showNow always play the notification sound, so the
     // countdown silences them from the start of the warning until the timer
@@ -46,9 +45,8 @@ namespace {
         }
     }
 
-    // Undoes everything the warning changed: brightness and notification sound.
+    // Undoes what the warning changed (the notification sound setting).
     void endWarningEffects() {
-        power::endDim();
         if (g_silencing.exchange(false, std::memory_order_acq_rel))
             ult::silenceNotifications = g_savedSilence;
     }
@@ -98,15 +96,9 @@ namespace {
     void configureTimer() {
         g_timer.setCallbacks({
             .onWarning = [] {
-                g_warningTicks.store(0, std::memory_order_release);
                 beginQuietCountdown();
-                power::beginDim();
             },
             .onWarningTick = [](u64 remaining) {
-                // The dim lasts one tick (about a second).
-                if (g_warningTicks.fetch_add(1, std::memory_order_acq_rel) == 1)
-                    power::endDim();
-
                 // showNow replaces its own previous toast in place, so this reads
                 // as one notification counting down rather than a stack of them.
                 if (tsl::notification) {
@@ -245,7 +237,6 @@ private:
             if (direction > 0 && g_timer.remaining() + StepMinutes * 60 > u64(MaxMinutes) * 60)
                 return;
             g_timer.adjust(delta, MinRemainingSeconds);
-            power::endDim();
             refreshStatus();
             return;
         }
