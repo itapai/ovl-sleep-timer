@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.1] - 2026-10-25
+
+### Fixed
+- With the overlay open, the timer cancelled itself as soon as the last minute began.
+  libtesla calls item listeners every frame even with no button pressed, and each listener
+  cancelled during the warning. Listeners now act only on A; other buttons still cancel.
+  Moving the cursor no longer cancels.
+
+### Added
+- **+1 / −1 min** buttons next to +5 / −5. The minimum duration is now 1 minute. A timer
+  shorter than a minute gets the countdown for all but its first second.
+
 ## [1.1.0] - 2026-10-25
 
 First version confirmed on hardware to put the console to sleep.
