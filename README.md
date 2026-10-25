@@ -25,7 +25,7 @@ Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 
 ```
 ▌Timer             Sleeps at 23:47
-  Stop                 ◀ 1:23:45 ▶
+  Stop            − 1h 23m 45s +
 ▌Quick start
   30 min
   1 h
@@ -37,19 +37,30 @@ Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 | Control | No timer | Timer running |
 |---|---|---|
 | **A** on the top row | Start with the duration shown | Stop |
-| **◀ / ▶** on the top row | Duration −/+ 5 min (hold to repeat) | Time left −/+ 5 min |
+| **◀ / ▶** (−/+) on the top row | Previous / next duration (hold to repeat) | Time left to the previous / next duration |
 | **A** on a Quick start row | Start with that time | Restart with that time |
 | **B** | Close the overlay | Hide the overlay; the timer keeps going |
 
 - The **Timer** header shows `Off`, `Sleeps at 23:47` (local time), or what went wrong:
   `Sleep failed: 2xxx-yyyy` or `Expired during sleep`.
-- Durations go 1, 5, 10, 15 … 600 min. The time left never goes below 1 minute or above
-  600 minutes.
+- −/+ step through these durations, finer for short timers and coarser for long ones:
+
+  | Range | Step | Durations |
+  |---|---|---|
+  | 1–10 min | 1 min | 1, 2, 3 … 10 min |
+  | 10–30 min | 5 min | 15, 20, 25, 30 min |
+  | 30 min–2 h | 15 min | 45 min, 1 h, 1 h 15 … 2 h |
+  | 2–4 h | 30 min | 2 h 30, 3 h, 3 h 30, 4 h |
+  | 4–10 h | 1 h | 5, 6, 7 … 10 h |
+
+- While a timer runs, −/+ round the time left to the next duration down or up, at least 30 s
+  away: with 43m 27s left, + gives 45m and − gives 30m. The time left never goes below
+  1 minute.
 - Press the overlay combo again to see the time left or to stop the timer.
 
 For the last minute, a notification counts down (`Sleeping in 0:59`, `0:58`, …). The
 countdown is silent: the overlay mutes its notification sound until the timer ends. To snooze,
-open the overlay and press **▶** (+5 min); to cancel, press **A** on **Stop**.
+open the overlay and press **▶** (+, to 2m); to cancel, press **A** on **Stop**.
 
 If you put the console to sleep yourself and wake it after the deadline, the timer does
 nothing and shows `Expired during sleep`. A sleep and wake that happen before the deadline

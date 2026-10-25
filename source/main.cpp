@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <functional>
+#include <iterator>
 #include <string>
 
 #include "sleep.hpp"
@@ -16,16 +17,22 @@ namespace {
     constexpr const char *ConfigSection = "settings";
 
     constexpr u32 Presets[] = { 30, 60, 90, 120, 180 };
-    constexpr u32 StepMinutes = 5;
+    // Stops for -/+: 1-min steps up to 10 min, then 5, 15, 30 and 60 min
+    // steps, so short timers are precise and long ones quick to reach.
+    constexpr u32 Stops[] = {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+        15, 20, 25, 30,
+        45, 60, 75, 90, 105, 120,
+        150, 180, 210, 240,
+        300, 360, 420, 480, 540, 600,
+    };
+    // + adds at least this much while running, so a press always counts.
+    constexpr u64 MinGainSeconds = 30;
     constexpr u32 MinMinutes = 1;
     constexpr u32 MaxMinutes = 600;
     constexpr u32 DefaultMinutes = 90;
     constexpr u64 WarningSeconds = 60;
     constexpr u64 MinRemainingSeconds = 60;
-
-    // D-pad left/right glyphs from the system's extended font.
-    constexpr const char *DpadLeft  = "";
-    constexpr const char *DpadRight = "";
 
     struct Config {
         u32 durationMinutes = DefaultMinutes;
@@ -61,12 +68,30 @@ namespace {
         return static_cast<u32>(minutes);
     }
 
-    // Next duration on the 5-minute grid (1, 5, 10, 15, …), so an odd value
-    // from config.ini snaps back onto it.
+    // Next stop above or below a duration; an odd value from config.ini
+    // snaps onto the stops.
     u32 steppedMinutes(u32 minutes, bool up) {
-        if (up)
-            return clampMinutes(minutes < StepMinutes ? StepMinutes : (minutes / StepMinutes + 1) * StepMinutes);
-        return clampMinutes(minutes <= StepMinutes ? MinMinutes : ((minutes - 1) / StepMinutes) * StepMinutes);
+        if (up) {
+            for (const u32 stop : Stops)
+                if (stop > minutes) return stop;
+            return MaxMinutes;
+        }
+        for (auto it = std::rbegin(Stops); it != std::rend(Stops); ++it)
+            if (*it < minutes) return *it;
+        return MinMinutes;
+    }
+
+    // Time left after -/+ while running: the next stop at least
+    // MinGainSeconds away, so 43:27 becomes 45:00 or 30:00.
+    u64 steppedRemaining(u64 seconds, bool up) {
+        if (up) {
+            for (const u32 stop : Stops)
+                if (u64(stop) * 60 >= seconds + MinGainSeconds) return u64(stop) * 60;
+            return seconds;
+        }
+        for (auto it = std::rbegin(Stops); it != std::rend(Stops); ++it)
+            if (u64(*it) * 60 + MinGainSeconds <= seconds) return u64(*it) * 60;
+        return MinRemainingSeconds;
     }
 
     void loadConfig() {
@@ -111,13 +136,27 @@ namespace {
             tsl::notification->dismissFront(); // the countdown toast
     }
 
-    // "1:23:45", or "23:45" under an hour.
+    // "1h 05m 09s", "5m 09s" or "42s"; padded so the countdown doesn't jitter.
     std::string formatRemaining(u64 seconds) {
         char buf[24];
         if (seconds >= 3600)
-            std::snprintf(buf, sizeof(buf), "%lu:%02lu:%02lu", seconds / 3600, (seconds / 60) % 60, seconds % 60);
+            std::snprintf(buf, sizeof(buf), "%luh %02lum %02lus", seconds / 3600, (seconds / 60) % 60, seconds % 60);
+        else if (seconds >= 60)
+            std::snprintf(buf, sizeof(buf), "%lum %02lus", seconds / 60, seconds % 60);
         else
-            std::snprintf(buf, sizeof(buf), "%lu:%02lu", seconds / 60, seconds % 60);
+            std::snprintf(buf, sizeof(buf), "%lus", seconds);
+        return buf;
+    }
+
+    // Same style for a duration on the main row: "45m", "1h", "1h 30m".
+    std::string formatShortMinutes(u32 minutes) {
+        char buf[24];
+        if (minutes < 60)
+            std::snprintf(buf, sizeof(buf), "%um", minutes);
+        else if (minutes % 60 == 0)
+            std::snprintf(buf, sizeof(buf), "%uh", minutes / 60);
+        else
+            std::snprintf(buf, sizeof(buf), "%uh %02um", minutes / 60, minutes % 60);
         return buf;
     }
 
@@ -177,7 +216,7 @@ namespace {
 
 }
 
-// List item that also reacts to D-pad left/right, repeating while held.
+// List item where D-pad left/right act as -/+, repeating while held.
 class AdjustableItem : public tsl::elm::ListItem {
 public:
     using Adjust = std::function<void(bool up)>;
@@ -239,7 +278,7 @@ public:
         m_header = new tsl::elm::CategoryHeader("Timer");
         list->addItem(m_header);
 
-        // One row for the timer: A starts or stops it, left/right change the
+        // One row for the timer: A starts or stops it, left/right (-/+) change the
         // duration, or the time left while it runs.
         // Note: libtesla calls click listeners every frame with that frame's
         // keysDown, which is usually 0. Act only on an actual A press.
@@ -291,10 +330,11 @@ public:
 private:
     void adjust(bool up) {
         if (g_timer.active()) {
-            const s64 delta = s64(StepMinutes) * 60;
-            if (up && g_timer.remaining() + u64(delta) > u64(MaxMinutes) * 60)
-                return;
-            g_timer.adjust(up ? delta : -delta, MinRemainingSeconds);
+            const u64 remaining = g_timer.remaining();
+            const u64 target = steppedRemaining(remaining, up);
+            // In the last minute, - would otherwise lengthen the timer to 1:00.
+            if (up ? target > remaining : target < remaining)
+                g_timer.adjust(s64(target) - s64(remaining), MinRemainingSeconds);
         } else {
             setDuration(steppedMinutes(g_config.durationMinutes, up));
         }
@@ -320,7 +360,7 @@ private:
             }
             case SleepTimer::State::Firing:
                 label = "Stop";
-                value = "0:00";
+                value = "0s";
                 header = "Sleeping…";
                 break;
             case SleepTimer::State::Failed:
@@ -334,7 +374,7 @@ private:
                 break;
         }
         if (!running && state != SleepTimer::State::Firing)
-            value = formatMinutes(g_config.durationMinutes);
+            value = formatShortMinutes(g_config.durationMinutes);
 
         if (header != m_headerText) {
             m_headerText = header;
@@ -344,7 +384,7 @@ private:
             m_labelText = label;
             m_main->setText(label);
         }
-        value = std::string(DpadLeft) + " " + value + " " + DpadRight;
+        value = "\u2212 " + value + " +";
         if (value != m_valueText) {
             m_valueText = value;
             m_main->setValue(value);
