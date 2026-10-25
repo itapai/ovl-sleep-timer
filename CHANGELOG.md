@@ -7,7 +7,7 @@
   up to 10 min, then 5 min up to 30, 15 min up to 2 h, 30 min up to 4 h, and 1 h up to 10 h.
 - While a timer runs, ◀ / ▶ round the time left to the next of those durations (43:27 becomes
   45:00 or 30:00) instead of adding or removing 5 min.
-- The row shows `− 1:23:45 +` instead of D-pad icons.
+- The row shows `− 1h 23m 45s +` instead of D-pad icons and `1:23:45`.
 
 ## [1.2.0] - 2026-10-25
 

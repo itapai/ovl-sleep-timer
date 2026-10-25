@@ -136,13 +136,27 @@ namespace {
             tsl::notification->dismissFront(); // the countdown toast
     }
 
-    // "1:23:45", or "23:45" under an hour.
+    // "1h 05m 09s", "5m 09s" or "42s"; padded so the countdown doesn't jitter.
     std::string formatRemaining(u64 seconds) {
         char buf[24];
         if (seconds >= 3600)
-            std::snprintf(buf, sizeof(buf), "%lu:%02lu:%02lu", seconds / 3600, (seconds / 60) % 60, seconds % 60);
+            std::snprintf(buf, sizeof(buf), "%luh %02lum %02lus", seconds / 3600, (seconds / 60) % 60, seconds % 60);
+        else if (seconds >= 60)
+            std::snprintf(buf, sizeof(buf), "%lum %02lus", seconds / 60, seconds % 60);
         else
-            std::snprintf(buf, sizeof(buf), "%lu:%02lu", seconds / 60, seconds % 60);
+            std::snprintf(buf, sizeof(buf), "%lus", seconds);
+        return buf;
+    }
+
+    // Same style for a duration on the main row: "45m", "1h", "1h 30m".
+    std::string formatShortMinutes(u32 minutes) {
+        char buf[24];
+        if (minutes < 60)
+            std::snprintf(buf, sizeof(buf), "%um", minutes);
+        else if (minutes % 60 == 0)
+            std::snprintf(buf, sizeof(buf), "%uh", minutes / 60);
+        else
+            std::snprintf(buf, sizeof(buf), "%uh %02um", minutes / 60, minutes % 60);
         return buf;
     }
 
@@ -346,7 +360,7 @@ private:
             }
             case SleepTimer::State::Firing:
                 label = "Stop";
-                value = "0:00";
+                value = "0s";
                 header = "Sleeping…";
                 break;
             case SleepTimer::State::Failed:
@@ -360,7 +374,7 @@ private:
                 break;
         }
         if (!running && state != SleepTimer::State::Firing)
-            value = formatMinutes(g_config.durationMinutes);
+            value = formatShortMinutes(g_config.durationMinutes);
 
         if (header != m_headerText) {
             m_headerText = header;

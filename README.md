@@ -25,7 +25,7 @@ Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 
 ```
 ▌Timer             Sleeps at 23:47
-  Stop                 − 1:23:45 +
+  Stop            − 1h 23m 45s +
 ▌Quick start
   30 min
   1 h
@@ -54,13 +54,13 @@ Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
   | 4–10 h | 1 h | 5, 6, 7 … 10 h |
 
 - While a timer runs, −/+ round the time left to the next duration down or up, at least 30 s
-  away: with 43:27 left, + gives 45:00 and − gives 30:00. The time left never goes below
+  away: with 43m 27s left, + gives 45m and − gives 30m. The time left never goes below
   1 minute.
 - Press the overlay combo again to see the time left or to stop the timer.
 
 For the last minute, a notification counts down (`Sleeping in 0:59`, `0:58`, …). The
 countdown is silent: the overlay mutes its notification sound until the timer ends. To snooze,
-open the overlay and press **▶** (+, to 2:00); to cancel, press **A** on **Stop**.
+open the overlay and press **▶** (+, to 2m); to cancel, press **A** on **Stop**.
 
 If you put the console to sleep yourself and wake it after the deadline, the timer does
 nothing and shows `Expired during sleep`. A sleep and wake that happen before the deadline
