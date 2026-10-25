@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.3] - 2026-10-25
+
+### Changed
+- +5 / −5 min moved up, directly under Start and Cancel; presets follow.
+
 ## [1.0.2] - 2026-10-25
 
 ### Added

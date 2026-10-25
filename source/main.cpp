@@ -129,18 +129,6 @@ public:
         });
         list->addItem(cancel);
 
-        list->addItem(new tsl::elm::CategoryHeader("Duration"));
-        for (const u32 minutes : Presets) {
-            auto *preset = new tsl::elm::ListItem(minutesLabel(minutes));
-            preset->setClickListener([this, minutes](u64 keys) {
-                if (consumeWarning()) return true;
-                if (!(keys & KEY_A)) return false;
-                setDuration(minutes);
-                return true;
-            });
-            list->addItem(preset);
-        }
-
         // While a timer runs these move its deadline (+5 during the warning acts
         // as a snooze); otherwise they change the duration used by Start.
         auto *plus = new tsl::elm::ListItem("+" + minutesLabel(StepMinutes));
@@ -158,6 +146,18 @@ public:
             return true;
         });
         list->addItem(minus);
+
+        list->addItem(new tsl::elm::CategoryHeader("Duration"));
+        for (const u32 minutes : Presets) {
+            auto *preset = new tsl::elm::ListItem(minutesLabel(minutes));
+            preset->setClickListener([this, minutes](u64 keys) {
+                if (consumeWarning()) return true;
+                if (!(keys & KEY_A)) return false;
+                setDuration(minutes);
+                return true;
+            });
+            list->addItem(preset);
+        }
 
         frame->setContent(list);
         refreshStatus();
