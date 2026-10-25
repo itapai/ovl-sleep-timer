@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.0] - unreleased
+## [1.0.0] - 2026-10-25
 
 ### Added
 - Countdown overlay with 30/60/90/120/180 min presets, ±15 min adjust, Start and Cancel.
