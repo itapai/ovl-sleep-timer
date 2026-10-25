@@ -4,7 +4,8 @@ Tesla/Ultrahand overlay that puts the Switch to sleep after a set time — for w
 
 The built-in auto-sleep only counts idle time, stops at 30 minutes in handheld mode, and
 video apps switch it off. This overlay counts down from a duration you pick and then
-runs the same sleep sequence as a press of the power button, whatever app is open.
+presses the power button for you, so the console goes to sleep exactly as if you had
+pressed it, whatever app is open.
 
 ## Requirements
 
@@ -23,9 +24,9 @@ Open the overlay menu with its button combo (Ultrahand's default is `ZL + ZR + D
 Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 
 - **Remaining** shows the time left, `Not running`, or an error code.
-- **Last sleep** shows how the last sleep attempt went, e.g. `spsm ok, 3 s, wake 0x12`:
-  the route, seconds until the console was back, and the wake reason the system reported.
-  Every attempt is also appended to `/config/ovl-sleep-timer/sleep.log`.
+- **Last sleep** shows how the last timer ended: `slept 42 min` (how long the console
+  slept before you woke it), `no sleep seen`, or an error code. Every attempt is also
+  appended to `/config/ovl-sleep-timer/sleep.log`.
 - **Start** begins the countdown with the duration shown next to it.
 - **Cancel** stops it.
 - **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+5 / −5 min** set the
@@ -61,7 +62,6 @@ warning=true
 |--------------------|----------------|--------------------------------------------|
 | `duration_minutes` | 5–600          | Last chosen duration, loaded on open       |
 | `warning`          | `true`/`false` | Last-minute countdown notification         |
-| `sleep_method`     | `button`/`spsm`/`omm` | Fallback sleep route (advanced; never written by the overlay) |
 
 The theme and wallpaper can be overridden in the same folder; see libultrahand's
 `UI_OVERRIDE_PATH`.
@@ -73,51 +73,25 @@ The theme and wallpaper can be overridden in the same folder; see libultrahand's
   running, this overlay is unloaded and the timer is lost. Hide it with B or the combo
   instead. The way around this later is a sysmodule that holds the countdown, with this
   overlay as its front end (`source/timer.*` has no UI code, so it can be moved as-is).
-- **Sleep route still being tested on hardware.** See below.
 
 ## How sleep is triggered
 
-On expiry the overlay calls `IGlobalStateController::StartSleepSequence(true)` (libnx:
-`appletStartSleepSequence`), which is what qlaunch calls when the power button is pressed.
-AM exposes that interface to overlay applets on 15.0.0+.
+When the timer ends, the overlay presses the power button for 150 ms through the debug HID
+service (`hid:dbg` cmd 121 `SetSleepButtonAutoPilotState`), releases it, and removes the
+override so the real button keeps working. AM sees an ordinary short press and the HOME
+menu runs its normal sleep sequence, so the app is suspended and resumed as usual and you
+get the lock screen on wake. The overlay then watches the steady clock for 30 s; a jump
+means the console slept, and its size is the time asleep.
 
-libtesla/libultrahand overlays run with `__nx_applet_type = AppletType_None` inside
-nx-ovlloader, which is a regular sysmodule. So libnx never opens an applet session for the
-overlay. `source/sleep.cpp` therefore opens one itself, the way libnx's `appletInitialize()`
-does for `AppletType_OverlayApplet`:
+Routes that were tried on hardware and don't work from an overlay:
 
-1. `appletAE` → domain → cmd 300 `OpenOverlayAppletProxy` (sends PID and process handle;
-   retries while AM reports busy)
-2. `IOverlayAppletProxy` cmd 23 `GetGlobalStateController`
-3. `IGlobalStateController` cmd 2 `StartSleepSequence(u8 = 1)`
-4. Closes all three sessions.
+| Route | Result |
+|---|---|
+| `IGlobalStateController::StartSleepSequence` via `appletAE` cmd 300 `OpenOverlayAppletProxy` (what the HOME menu itself calls) | AM refuses: `2128-0980`. nx-ovlloader isn't a process AM launched as an applet. |
+| `omm` cmd 4 `EnterSleepAndWait` | Screen off for 1–2 s, then back on; the call never returns. |
+| `spsm` cmd 1 `EnterSleep` | Returns at once; screen off for 1–2 s, then back on. |
 
-**AM refuses step 1** on real hardware (1.0.0 showed `2128-0980`, i.e. `0x7A880`), because
-nx-ovlloader's process isn't one that AM launched as an applet. The overlay then falls back to
-one of these, chosen with `sleep_method` in `config.ini`:
-
-| `sleep_method`   | Request                          | Hardware result so far                              |
-|------------------|----------------------------------|-----------------------------------------------------|
-| `button` (default) | Simulated short power-button press: `hid:dbg` cmd 121 `SetSleepButtonAutoPilotState` pressed for 150 ms, released, then the override is removed | Not yet tested (1.0.8) |
-| `spsm`           | `spsm` cmd 1 `EnterSleep`        | 1.0.6/1.0.7: returns at once (`0 s`); screen dark 1–2 s, video pauses, no sleep (`wake 0x80`) |
-| `omm`            | `omm` cmd 4 `EnterSleepAndWait`  | 1.0.4: screen went dark briefly, came back, no sleep; the call never returned |
-
-The fallback request runs on its own thread and is abandoned after 15 seconds. **Remaining**
-then shows e.g. `spsm: no response` instead of hanging, and Cancel keeps working. Any other
-failure shows the route and code, e.g. `spsm: 2xxx-yyyy (0x…)`. Please open an issue with it.
-
-Left out: the qlaunch general-channel message (message IDs unverified) and
-`PerformSystemButtonPressing` (needs a debug permission).
-
-### Test plan
-
-1. Set a 5 min timer (the minimum), hide the overlay, and check that the console sleeps
-   at 0:00:00 and the app resumes normally on wake.
-2. Repeat while the YouTube app is playing a video.
-3. Start a timer, sleep manually, and wake after the deadline: no second sleep, status
-   `Expired during sleep`.
-4. Start/cancel several times and hide/show several times; then exit the overlay. There
-   should be no crash or hang.
+Both direct requests start a sleep that backs out, presumably because AM didn't start it.
 
 ## Building
 

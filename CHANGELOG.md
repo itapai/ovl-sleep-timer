@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0] - 2026-10-25
+
+First version confirmed on hardware to put the console to sleep.
+
+### Changed
+- Sleep works by simulating a short power-button press (`hid:dbg`), so the HOME menu runs
+  its normal sleep sequence. Confirmed on hardware: the screen stays off until the power
+  button is pressed, and the console wakes to the lock screen.
+- **Last sleep** now shows how long the console actually slept (`slept 42 min`), or
+  `no sleep seen`, measured on the steady clock after the press. `sleep.log` records the same.
+
+### Removed
+- The routes that didn't work on hardware (AM overlay proxy, `spsm`, `omm`), the
+  `sleep_method` setting, the 15 s request timeout they needed, and the wake-reason readout.
+
 ## [1.0.8] - 2026-10-25
 
 ### Changed

@@ -27,7 +27,6 @@ namespace {
     struct Config {
         u32 durationMinutes = DefaultMinutes;
         bool warning = true;
-        power::SleepMethod sleepMethod = power::SleepMethod::Button;
     };
 
     Config g_config;
@@ -72,12 +71,6 @@ namespace {
         const std::string warning = ult::parseValueFromIniSection(ConfigPath, ConfigSection, "warning");
         if (!warning.empty())
             g_config.warning = !(warning == "0" || warning == "false");
-
-        // Only read, never written: an advanced switch for testing sleep routes.
-        const std::string method = ult::parseValueFromIniSection(ConfigPath, ConfigSection, "sleep_method");
-        g_config.sleepMethod = method == "omm"  ? power::SleepMethod::Omm
-                             : method == "spsm" ? power::SleepMethod::Spsm
-                                                : power::SleepMethod::Button;
     }
 
     void saveConfig() {
@@ -98,23 +91,21 @@ namespace {
         return buf;
     }
 
-    // Short form for the overlay, e.g. "spsm ok, 3 s, wake 0x12".
+    // Short form for the overlay, e.g. "slept 12 min".
     std::string describeReport(const power::SleepReport &report) {
-        std::string text = power::pathName(report.path);
-        if (report.result == power::ResultNoResponse()) {
-            text += " no response";
-        } else if (R_FAILED(report.result)) {
-            text += " " + formatResult(report.result);
-        } else {
-            char buf[48];
-            std::snprintf(buf, sizeof(buf), " ok, %lu s", report.elapsedSeconds);
-            text += buf;
-            if (report.hasWakeReason) {
-                std::snprintf(buf, sizeof(buf), ", wake 0x%X", report.wakeReason);
-                text += buf;
-            }
-        }
-        return text;
+        if (R_FAILED(report.result))
+            return "error " + formatResult(report.result);
+        if (!report.slept)
+            return "no sleep seen";
+
+        char buf[32];
+        if (report.sleptSeconds < 60)
+            std::snprintf(buf, sizeof(buf), "slept %lu s", report.sleptSeconds);
+        else if (report.sleptSeconds < 3600)
+            std::snprintf(buf, sizeof(buf), "slept %lu min", report.sleptSeconds / 60);
+        else
+            std::snprintf(buf, sizeof(buf), "slept %lu h %lu min", report.sleptSeconds / 3600, (report.sleptSeconds / 60) % 60);
+        return buf;
     }
 
     // One line per sleep attempt, so results survive the overlay being closed.
@@ -129,8 +120,8 @@ namespace {
         if (const tm *local = localtime(&now))
             std::strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", local);
 
-        std::fprintf(file, "%s %s rc=0x%X elapsed=%lus wake=%s0x%X\n", stamp, power::pathName(report.path),
-                     report.result, report.elapsedSeconds, report.hasWakeReason ? "" : "n/a ", report.wakeReason);
+        std::fprintf(file, "%s rc=0x%X slept=%s seconds=%lu\n", stamp, report.result,
+                     report.slept ? "yes" : "no", report.sleptSeconds);
         std::fclose(file);
     }
 
@@ -155,7 +146,7 @@ namespace {
             .onExpire = [] {
                 endWarningEffects();
                 power::SleepReport report;
-                const Result rc = power::putSystemToSleep(g_config.sleepMethod, &report);
+                const Result rc = power::putSystemToSleep(&report);
                 appendLog(report);
                 {
                     std::lock_guard lock(g_reportMutex);
@@ -192,8 +183,8 @@ public:
         m_status->setClickListener([](u64) { return consumeWarning(); });
         list->addItem(m_status);
 
-        // Result of the last sleep attempt (route, time until the console came
-        // back, wake reason); also appended to sleep.log.
+        // How the last sleep attempt went, e.g. "slept 12 min"; also appended
+        // to sleep.log.
         m_last = new tsl::elm::ListItem("Last sleep", "");
         m_last->setClickListener([](u64) { return consumeWarning(); });
         list->addItem(m_last);

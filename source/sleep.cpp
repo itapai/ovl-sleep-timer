@@ -1,36 +1,20 @@
 #include "sleep.hpp"
 
-#include <atomic>
-
 namespace power {
 
     namespace {
 
-        // IAllSystemAppletProxiesService (appletAE)
-        constexpr u32 CmdOpenOverlayAppletProxy = 300;
-        // IOverlayAppletProxy [15.0.0+]
-        constexpr u32 CmdGetGlobalStateController = 23;
-        // IGlobalStateController
-        constexpr u32 CmdStartSleepSequence = 2;
-
-        // omm (IOperationModeManager)
-        constexpr u32 CmdEnterSleepAndWait = 4;
-        // spsm (ISystemManager)
-        constexpr u32 CmdSpsmEnterSleep = 1;
-        constexpr u32 CmdSpsmGetLastWakeReason = 2;
-
-        constexpr u64 FallbackTimeoutNs = 15'000'000'000ULL;
-
         // A short press sleeps; a long one opens the power menu.
         constexpr u64 ButtonPressNs = 150'000'000ULL;
         constexpr u64 ButtonReleaseNs = 100'000'000ULL;
-        // How long to wait after a press before measuring, so a sleep that
-        // starts shows up in elapsedSeconds.
-        constexpr u64 ButtonSettleNs = 5'000'000'000ULL;
 
-        // AM returns this while it is busy; libnx's appletInitialize retries on it.
-        constexpr u32 AmBusyError = 0x19280;
+        // After the press, how long to watch for the sleep, and how big a jump
+        // in the steady clock between one-second polls counts as "was asleep".
+        constexpr u64 WatchSeconds = 30;
+        constexpr u64 SuspendGapSeconds = 5;
+        constexpr u64 PollNs = 1'000'000'000ULL;
 
+        // The standard steady clock keeps counting while the console sleeps.
         u64 steadySeconds() {
             TimeSteadyClockTimePoint point;
             if (serviceIsActive(timeGetServiceSession_SteadyClock()) &&
@@ -39,111 +23,14 @@ namespace power {
             return armTicksToNs(armGetSystemTick()) / 1'000'000'000ULL;
         }
 
-        Result getLastWakeReason(u32 *out) {
-            Service *spsm = spsmGetServiceSession();
-            if (!serviceIsActive(spsm))
-                return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
-            return serviceDispatchOut(spsm, CmdSpsmGetLastWakeReason, *out);
-        }
-
-        Result startSleepViaLibnx() {
-            // libtesla sets __nx_applet_type = AppletType_None, so this session is
-            // normally not initialised. Kept in case a host ever provides one.
-            if (!serviceIsActive(appletGetServiceSession_GlobalStateController()))
-                return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
-
-            return appletStartSleepSequence(true);
-        }
-
-        // Opens IGlobalStateController the way libnx's appletInitialize() does for
-        // AppletType_OverlayApplet, calls StartSleepSequence and closes everything.
-        // nx-ovlloader is a plain sysmodule (not registered with AM as an applet),
-        // so AM may refuse the proxy; the Result says so.
-        Result startSleepViaOverlayProxy() {
-            Service ae = {}, proxy = {}, globalState = {};
-
-            Result rc = smGetService(&ae, "appletAE");
-            if (R_FAILED(rc))
-                return rc;
-
-            rc = serviceConvertToDomain(&ae);
-
-            if (R_SUCCEEDED(rc)) {
-                for (int attempt = 0; attempt < 20; attempt++) {
-                    const u64 reserved = 0;
-                    serviceAssumeDomain(&ae);
-                    rc = serviceDispatchIn(&ae, CmdOpenOverlayAppletProxy, reserved,
-                        .in_send_pid = true,
-                        .in_num_handles = 1,
-                        .in_handles = { CUR_PROCESS_HANDLE },
-                        .out_num_objects = 1,
-                        .out_objects = &proxy,
-                    );
-                    if (R_VALUE(rc) != AmBusyError)
-                        break;
-                    svcSleepThread(100'000'000ULL);
-                }
-            }
-
-            if (R_SUCCEEDED(rc)) {
-                serviceAssumeDomain(&proxy);
-                rc = serviceDispatch(&proxy, CmdGetGlobalStateController,
-                    .out_num_objects = 1,
-                    .out_objects = &globalState,
-                );
-            }
-
-            if (R_SUCCEEDED(rc)) {
-                const u8 flag = 1; // official software hard-codes true
-                serviceAssumeDomain(&globalState);
-                rc = serviceDispatchIn(&globalState, CmdStartSleepSequence, flag);
-            }
-
-            serviceClose(&globalState);
-            serviceClose(&proxy);
-            serviceClose(&ae);
-            return rc;
-        }
-
-        // omm is the sysmodule that drives the display/operation-mode side of
-        // sleep. On hardware (1.0.4) this turned the screen off briefly and then
-        // never returned, presumably waiting on AM, which didn't start the
-        // sequence. Kept as an opt-in method. The event is handed over writable
-        // so omm can signal it.
-        Result startSleepViaOmm() {
-            Service omm = {};
-            Result rc = smGetService(&omm, "omm");
-            if (R_FAILED(rc))
-                return rc;
-
-            Event event = {};
-            rc = eventCreate(&event, false);
-            if (R_SUCCEEDED(rc)) {
-                rc = serviceDispatch(&omm, CmdEnterSleepAndWait,
-                    .in_num_handles = 1,
-                    .in_handles = { event.wevent },
-                );
-                eventClose(&event);
-            }
-
-            serviceClose(&omm);
-            return rc;
-        }
-
-        // spsm is the power-state manager underneath omm; AM and omm learn about
-        // the transition through PSC like for any other sleep.
-        Result startSleepViaSpsm() {
-            Service *spsm = spsmGetServiceSession();
-            if (!serviceIsActive(spsm))
-                return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
-            return serviceDispatch(spsm, CmdSpsmEnterSleep);
-        }
-
-        // Presses the power button the way the hardware does: hid:dbg overrides
-        // the sleep-button state that AM watches through hid:sys, so AM sees an
-        // ordinary short press and qlaunch runs its normal sleep sequence. The
-        // override is always released, or the real button would stop working.
-        Result startSleepViaButton() {
+        // The overlay runs inside nx-ovlloader, which AM doesn't treat as an
+        // applet, so it can't call IGlobalStateController::StartSleepSequence
+        // (AM answers 2128-0980), and asking spsm or omm directly only blanks
+        // the screen for a second. Instead, hid:dbg overrides the sleep-button
+        // state that AM watches through hid:sys: AM sees an ordinary short press
+        // of the power button and qlaunch runs its own sleep sequence. The
+        // override is always removed, or the real button would stop working.
+        Result pressPowerButton() {
             Result rc = hiddbgInitialize();
             if (R_FAILED(rc))
                 return rc;
@@ -162,114 +49,36 @@ namespace power {
             return rc;
         }
 
-        // The fallback requests can block indefinitely (omm did), so they run on
-        // a helper thread and the caller gives up after a timeout. A helper that
-        // never returns is left behind; it dies with the overlay process.
-        struct Request {
-            SleepPath path;
-            Result result;
-            UEvent done;
-        };
-
-        Thread g_helper;
-        bool g_helperCreated = false;
-        std::atomic<bool> g_helperBusy{false};
-        Request g_request;
-
-        void helperEntry(void *) {
-            switch (g_request.path) {
-                case SleepPath::Omm:  g_request.result = startSleepViaOmm(); break;
-                case SleepPath::Spsm: g_request.result = startSleepViaSpsm(); break;
-                default:              g_request.result = startSleepViaButton(); break;
-            }
-            g_helperBusy.store(false, std::memory_order_release);
-            ueventSignal(&g_request.done);
-        }
-
-        Result runWithTimeout(SleepPath path, u64 timeoutNs) {
-            if (g_helperBusy.load(std::memory_order_acquire))
-                return ResultNoResponse(); // previous request is still stuck
-
-            if (g_helperCreated) {
-                threadWaitForExit(&g_helper);
-                threadClose(&g_helper);
-                g_helperCreated = false;
-            }
-
-            g_request.path = path;
-            g_request.result = 0;
-            ueventCreate(&g_request.done, false);
-
-            Result rc = threadCreate(&g_helper, helperEntry, nullptr, nullptr, 0x2000, 0x2c, -2);
-            if (R_FAILED(rc))
-                return rc;
-            g_helperCreated = true;
-            g_helperBusy.store(true, std::memory_order_release);
-
-            rc = threadStart(&g_helper);
-            if (R_FAILED(rc)) {
-                g_helperBusy.store(false, std::memory_order_release);
-                return rc;
-            }
-
-            if (R_FAILED(waitSingle(waiterForUEvent(&g_request.done), timeoutNs)))
-                return ResultNoResponse();
-            return g_request.result;
-        }
-
-    }
-
-    Result ResultNoResponse() {
-        return MAKERESULT(Module_Libnx, LibnxError_Timeout);
     }
 
     bool isSupported() {
         return hosversionAtLeast(15, 0, 0);
     }
 
-    Result putSystemToSleep(SleepMethod method, SleepReport *report) {
-        const u64 start = steadySeconds();
-        SleepPath path = SleepPath::LibnxApplet;
-        Result rc = startSleepViaLibnx();
+    Result putSystemToSleep(SleepReport *report) {
+        SleepReport result;
+        result.result = pressPowerButton();
 
-        if (R_FAILED(rc)) {
-            path = SleepPath::OverlayProxy;
-            rc = startSleepViaOverlayProxy();
-        }
-
-        if (R_FAILED(rc)) {
-            switch (method) {
-                case SleepMethod::Omm:  path = SleepPath::Omm; break;
-                case SleepMethod::Spsm: path = SleepPath::Spsm; break;
-                default:                path = SleepPath::Button; break;
+        if (R_SUCCEEDED(result.result)) {
+            // This thread is suspended along with everything else while the
+            // console sleeps, so the sleep shows up as one large jump.
+            u64 last = steadySeconds();
+            const u64 until = last + WatchSeconds;
+            while (last < until) {
+                svcSleepThread(PollNs);
+                const u64 now = steadySeconds();
+                if (now > last + SuspendGapSeconds) {
+                    result.slept = true;
+                    result.sleptSeconds = now - last;
+                    break;
+                }
+                last = now;
             }
-            rc = runWithTimeout(path, FallbackTimeoutNs);
-
-            // The press returns at once; give the sleep a moment to begin, so a
-            // console that really slept reports minutes here, not seconds.
-            if (path == SleepPath::Button && R_SUCCEEDED(rc))
-                svcSleepThread(ButtonSettleNs);
         }
 
-        if (report) {
-            const u64 end = steadySeconds();
-            report->path = path;
-            report->result = rc;
-            report->elapsedSeconds = end > start ? end - start : 0;
-            report->hasWakeReason = R_SUCCEEDED(getLastWakeReason(&report->wakeReason));
-        }
-        return rc;
-    }
-
-    const char *pathName(SleepPath path) {
-        switch (path) {
-            case SleepPath::LibnxApplet:  return "libnx applet";
-            case SleepPath::OverlayProxy: return "overlay proxy";
-            case SleepPath::Omm:          return "omm";
-            case SleepPath::Spsm:         return "spsm";
-            case SleepPath::Button:       return "button";
-            default:                      return "none";
-        }
+        if (report)
+            *report = result;
+        return result.result;
     }
 
 }
