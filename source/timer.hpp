@@ -22,7 +22,8 @@ public:
     };
 
     struct Callbacks {
-        std::function<void()>   onWarning;  // timer thread, once per run
+        std::function<void()>   onWarning;  // timer thread, on entering the warning window
+        std::function<void(u64)> onWarningTick; // timer thread, each tick in the window; seconds left
         std::function<Result()> onExpire;   // timer thread, once per run
     };
 

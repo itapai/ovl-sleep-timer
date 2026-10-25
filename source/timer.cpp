@@ -158,5 +158,8 @@ void SleepTimer::run() {
             warned = false;
             m_state.store(State::Running, std::memory_order_release);
         }
+
+        if (inWindow && m_callbacks.onWarningTick)
+            m_callbacks.onWarningTick(deadline - now);
     }
 }

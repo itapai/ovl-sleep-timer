@@ -34,8 +34,8 @@ Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 While a timer is running, **B hides the overlay** and doesn't close it, so the countdown
 keeps going. Press the overlay combo again to see the time left or to cancel.
 
-One minute before sleep, a notification appears and the screen blinks off for about a
-second. Pressing any button in the open overlay during that minute cancels the timer,
+For the last minute, a notification counts down (`Sleeping in 0:59`, `0:58`, …), and the
+screen dims for about a second when it starts. Pressing any button in the open overlay during that minute cancels the timer,
 except **+5 min**, which adds 5 minutes instead (a snooze).
 
 If you put the console to sleep yourself and wake it after the deadline, the timer does
@@ -56,7 +56,7 @@ warning=true
 | Key                | Values         | Meaning                                    |
 |--------------------|----------------|--------------------------------------------|
 | `duration_minutes` | 5–600          | Last chosen duration, loaded on open       |
-| `warning`          | `true`/`false` | Notification + backlight blink at T−60 s   |
+| `warning`          | `true`/`false` | Last-minute countdown + one-second dim     |
 
 The theme and wallpaper can be overridden in the same folder; see libultrahand's
 `UI_OVERRIDE_PATH`.

@@ -21,8 +21,12 @@ namespace power {
     // attempt; *used names the path that succeeded (or the last one tried).
     Result putSystemToSleep(SleepPath *used);
 
-    // Switches the backlight off for about a second, then back on. Best effort.
-    void blinkBacklight();
+    // Drops the screen brightness to a fifth of the current setting without
+    // saving it. Best effort; does nothing if already dimmed.
+    void beginDim();
+    // Restores the brightness saved by beginDim(). Safe to call at any time
+    // and from any thread.
+    void endDim();
 
     const char *pathName(SleepPath path);
 
