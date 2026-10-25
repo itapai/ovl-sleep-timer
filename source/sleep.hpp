@@ -11,11 +11,13 @@ namespace power {
         LibnxApplet,    // libnx applet session (only if the host initialised one)
         OverlayProxy,   // appletAE -> OpenOverlayAppletProxy -> IGlobalStateController
         Omm,            // omm EnterSleepAndWait (opt-in fallback)
-        Spsm,           // spsm EnterSleep (default fallback)
+        Spsm,           // spsm EnterSleep (opt-in fallback)
+        Button,         // simulated power-button press via hid:dbg (default fallback)
     };
 
     // Which fallback to use once AM has refused the overlay proxy.
     enum class SleepMethod {
+        Button,
         Spsm,
         Omm,
     };

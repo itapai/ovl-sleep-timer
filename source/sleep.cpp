@@ -21,6 +21,13 @@ namespace power {
 
         constexpr u64 FallbackTimeoutNs = 15'000'000'000ULL;
 
+        // A short press sleeps; a long one opens the power menu.
+        constexpr u64 ButtonPressNs = 150'000'000ULL;
+        constexpr u64 ButtonReleaseNs = 100'000'000ULL;
+        // How long to wait after a press before measuring, so a sleep that
+        // starts shows up in elapsedSeconds.
+        constexpr u64 ButtonSettleNs = 5'000'000'000ULL;
+
         // AM returns this while it is busy; libnx's appletInitialize retries on it.
         constexpr u32 AmBusyError = 0x19280;
 
@@ -132,6 +139,29 @@ namespace power {
             return serviceDispatch(spsm, CmdSpsmEnterSleep);
         }
 
+        // Presses the power button the way the hardware does: hid:dbg overrides
+        // the sleep-button state that AM watches through hid:sys, so AM sees an
+        // ordinary short press and qlaunch runs its normal sleep sequence. The
+        // override is always released, or the real button would stop working.
+        Result startSleepViaButton() {
+            Result rc = hiddbgInitialize();
+            if (R_FAILED(rc))
+                return rc;
+
+            HiddbgSleepButtonAutoPilotState state = { .buttons = 1 };
+            rc = hiddbgSetSleepButtonAutoPilotState(&state);
+            if (R_SUCCEEDED(rc)) {
+                svcSleepThread(ButtonPressNs);
+                state.buttons = 0;
+                hiddbgSetSleepButtonAutoPilotState(&state);
+                svcSleepThread(ButtonReleaseNs);
+            }
+            hiddbgUnsetSleepButtonAutoPilotState();
+
+            hiddbgExit();
+            return rc;
+        }
+
         // The fallback requests can block indefinitely (omm did), so they run on
         // a helper thread and the caller gives up after a timeout. A helper that
         // never returns is left behind; it dies with the overlay process.
@@ -147,7 +177,11 @@ namespace power {
         Request g_request;
 
         void helperEntry(void *) {
-            g_request.result = g_request.path == SleepPath::Omm ? startSleepViaOmm() : startSleepViaSpsm();
+            switch (g_request.path) {
+                case SleepPath::Omm:  g_request.result = startSleepViaOmm(); break;
+                case SleepPath::Spsm: g_request.result = startSleepViaSpsm(); break;
+                default:              g_request.result = startSleepViaButton(); break;
+            }
             g_helperBusy.store(false, std::memory_order_release);
             ueventSignal(&g_request.done);
         }
@@ -204,8 +238,17 @@ namespace power {
         }
 
         if (R_FAILED(rc)) {
-            path = method == SleepMethod::Omm ? SleepPath::Omm : SleepPath::Spsm;
+            switch (method) {
+                case SleepMethod::Omm:  path = SleepPath::Omm; break;
+                case SleepMethod::Spsm: path = SleepPath::Spsm; break;
+                default:                path = SleepPath::Button; break;
+            }
             rc = runWithTimeout(path, FallbackTimeoutNs);
+
+            // The press returns at once; give the sleep a moment to begin, so a
+            // console that really slept reports minutes here, not seconds.
+            if (path == SleepPath::Button && R_SUCCEEDED(rc))
+                svcSleepThread(ButtonSettleNs);
         }
 
         if (report) {
@@ -224,6 +267,7 @@ namespace power {
             case SleepPath::OverlayProxy: return "overlay proxy";
             case SleepPath::Omm:          return "omm";
             case SleepPath::Spsm:         return "spsm";
+            case SleepPath::Button:       return "button";
             default:                      return "none";
         }
     }

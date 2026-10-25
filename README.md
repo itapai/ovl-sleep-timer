@@ -61,7 +61,7 @@ warning=true
 |--------------------|----------------|--------------------------------------------|
 | `duration_minutes` | 5–600          | Last chosen duration, loaded on open       |
 | `warning`          | `true`/`false` | Last-minute countdown notification         |
-| `sleep_method`     | `spsm`/`omm`   | Fallback sleep route (advanced; never written by the overlay) |
+| `sleep_method`     | `button`/`spsm`/`omm` | Fallback sleep route (advanced; never written by the overlay) |
 
 The theme and wallpaper can be overridden in the same folder; see libultrahand's
 `UI_OVERRIDE_PATH`.
@@ -98,7 +98,8 @@ one of these, chosen with `sleep_method` in `config.ini`:
 
 | `sleep_method`   | Request                          | Hardware result so far                              |
 |------------------|----------------------------------|-----------------------------------------------------|
-| `spsm` (default) | `spsm` cmd 1 `EnterSleep`        | 1.0.6: returns success; screen goes off, video pauses, then the screen comes back on |
+| `button` (default) | Simulated short power-button press: `hid:dbg` cmd 121 `SetSleepButtonAutoPilotState` pressed for 150 ms, released, then the override is removed | Not yet tested (1.0.8) |
+| `spsm`           | `spsm` cmd 1 `EnterSleep`        | 1.0.6/1.0.7: returns at once (`0 s`); screen dark 1–2 s, video pauses, no sleep (`wake 0x80`) |
 | `omm`            | `omm` cmd 4 `EnterSleepAndWait`  | 1.0.4: screen went dark briefly, came back, no sleep; the call never returned |
 
 The fallback request runs on its own thread and is abandoned after 15 seconds. **Remaining**

@@ -27,7 +27,7 @@ namespace {
     struct Config {
         u32 durationMinutes = DefaultMinutes;
         bool warning = true;
-        power::SleepMethod sleepMethod = power::SleepMethod::Spsm;
+        power::SleepMethod sleepMethod = power::SleepMethod::Button;
     };
 
     Config g_config;
@@ -75,7 +75,9 @@ namespace {
 
         // Only read, never written: an advanced switch for testing sleep routes.
         const std::string method = ult::parseValueFromIniSection(ConfigPath, ConfigSection, "sleep_method");
-        g_config.sleepMethod = method == "omm" ? power::SleepMethod::Omm : power::SleepMethod::Spsm;
+        g_config.sleepMethod = method == "omm"  ? power::SleepMethod::Omm
+                             : method == "spsm" ? power::SleepMethod::Spsm
+                                                : power::SleepMethod::Button;
     }
 
     void saveConfig() {

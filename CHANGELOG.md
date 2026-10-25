@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.8] - 2026-10-25
+
+### Changed
+- New default sleep route `button`: a simulated short press of the power button through
+  `hid:dbg`, so AM and the HOME menu run their own sleep sequence. On hardware, `spsm`
+  returned at once and backed out of sleep after 1–2 s; it stays available as
+  `sleep_method=spsm`, as does `omm`.
+- After a button press the overlay waits 5 s before recording **Last sleep**, so a real
+  sleep shows up as a long time there.
+
 ## [1.0.7] - 2026-10-25
 
 ### Added
