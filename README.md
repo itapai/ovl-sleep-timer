@@ -25,14 +25,18 @@ Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 - **Remaining** shows the time left, `Not running`, or an error code.
 - **Start** begins the countdown with the duration shown next to it.
 - **Cancel** stops it.
-- **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+5 / −5 min** change the
-  duration (5–600 min). They do not restart a running timer; press Start again for that.
+- **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+5 / −5 min** set the
+  duration Start uses (5–600 min).
+- **While a timer is running, +5 / −5 min change the time left** instead. −5 never takes it
+  below 1 minute, and +5 stops at 600 minutes. Presets still only change the duration for the
+  next Start.
 
 While a timer is running, **B hides the overlay** and doesn't close it, so the countdown
 keeps going. Press the overlay combo again to see the time left or to cancel.
 
 One minute before sleep, a notification appears and the screen blinks off for about a
-second. Pressing any button in the open overlay during that minute cancels the timer.
+second. Pressing any button in the open overlay during that minute cancels the timer,
+except **+5 min**, which adds 5 minutes instead (a snooze).
 
 If you put the console to sleep yourself and wake it after the deadline, the timer does
 nothing and shows `Expired during sleep`. A sleep and wake that happen before the deadline

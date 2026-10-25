@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.2] - 2026-10-25
+
+### Added
+- +5 / −5 min adjust the time left while a timer is running (never below 1 min left,
+  never above 600 min). +5 during the final-minute warning works as a snooze.
+
 ## [1.0.1] - 2026-10-25
 
 ### Fixed

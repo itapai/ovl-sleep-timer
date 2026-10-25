@@ -69,6 +69,27 @@ Result SleepTimer::start(u64 seconds, u64 warningSeconds) {
     return rc;
 }
 
+bool SleepTimer::adjust(s64 deltaSeconds, u64 minRemainingSeconds) {
+    if (state() != State::Running && state() != State::Warning)
+        return false;
+
+    const u64 now = nowSeconds();
+    u64 deadline = m_deadline.load(std::memory_order_acquire);
+    u64 updated;
+    do {
+        const s64 target = s64(deadline) + deltaSeconds;
+        const u64 floor = now + minRemainingSeconds;
+        // Shortening never goes below the floor, and never lengthens the timer
+        // when it is already under it.
+        if (deltaSeconds < 0)
+            updated = target < s64(floor) ? (deadline < floor ? deadline : floor) : u64(target);
+        else
+            updated = u64(target);
+    } while (!m_deadline.compare_exchange_weak(deadline, updated, std::memory_order_acq_rel));
+
+    return true;
+}
+
 void SleepTimer::cancel() {
     join();
     m_state.store(State::Idle, std::memory_order_release);
@@ -124,12 +145,18 @@ void SleepTimer::run() {
             return;
         }
 
+        // Re-evaluated every tick because adjust() can move the deadline in or
+        // out of the warning window.
         const u64 warningSeconds = m_warningSeconds.load(std::memory_order_acquire);
-        if (!warned && warningSeconds != 0 && deadline - now <= warningSeconds) {
+        const bool inWindow = warningSeconds != 0 && deadline - now <= warningSeconds;
+        if (inWindow && !warned) {
             warned = true;
             m_state.store(State::Warning, std::memory_order_release);
             if (m_callbacks.onWarning)
                 m_callbacks.onWarning();
+        } else if (!inWindow && warned) {
+            warned = false;
+            m_state.store(State::Running, std::memory_order_release);
         }
     }
 }
