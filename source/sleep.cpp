@@ -17,11 +17,27 @@ namespace power {
         constexpr u32 CmdEnterSleepAndWait = 4;
         // spsm (ISystemManager)
         constexpr u32 CmdSpsmEnterSleep = 1;
+        constexpr u32 CmdSpsmGetLastWakeReason = 2;
 
         constexpr u64 FallbackTimeoutNs = 15'000'000'000ULL;
 
         // AM returns this while it is busy; libnx's appletInitialize retries on it.
         constexpr u32 AmBusyError = 0x19280;
+
+        u64 steadySeconds() {
+            TimeSteadyClockTimePoint point;
+            if (serviceIsActive(timeGetServiceSession_SteadyClock()) &&
+                R_SUCCEEDED(timeGetStandardSteadyClockTimePoint(&point)) && point.time_point >= 0)
+                return static_cast<u64>(point.time_point);
+            return armTicksToNs(armGetSystemTick()) / 1'000'000'000ULL;
+        }
+
+        Result getLastWakeReason(u32 *out) {
+            Service *spsm = spsmGetServiceSession();
+            if (!serviceIsActive(spsm))
+                return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
+            return serviceDispatchOut(spsm, CmdSpsmGetLastWakeReason, *out);
+        }
 
         Result startSleepViaLibnx() {
             // libtesla sets __nx_applet_type = AppletType_None, so this session is
@@ -177,7 +193,8 @@ namespace power {
         return hosversionAtLeast(15, 0, 0);
     }
 
-    Result putSystemToSleep(SleepMethod method, SleepPath *used) {
+    Result putSystemToSleep(SleepMethod method, SleepReport *report) {
+        const u64 start = steadySeconds();
         SleepPath path = SleepPath::LibnxApplet;
         Result rc = startSleepViaLibnx();
 
@@ -191,8 +208,13 @@ namespace power {
             rc = runWithTimeout(path, FallbackTimeoutNs);
         }
 
-        if (used)
-            *used = path;
+        if (report) {
+            const u64 end = steadySeconds();
+            report->path = path;
+            report->result = rc;
+            report->elapsedSeconds = end > start ? end - start : 0;
+            report->hasWakeReason = R_SUCCEEDED(getLastWakeReason(&report->wakeReason));
+        }
         return rc;
     }
 

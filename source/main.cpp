@@ -3,6 +3,8 @@
 #include <tesla.hpp>
 
 #include <cstdio>
+#include <ctime>
+#include <mutex>
 #include <string>
 
 #include "sleep.hpp"
@@ -30,7 +32,12 @@ namespace {
 
     Config g_config;
     SleepTimer g_timer;
-    std::atomic<power::SleepPath> g_lastPath{power::SleepPath::None};
+    constexpr const char *LogPath = "sdmc:/config/ovl-sleep-timer/sleep.log";
+
+    // Written by the timer thread on expiry, read by the UI.
+    std::mutex g_reportMutex;
+    power::SleepReport g_lastReport;
+    bool g_haveReport = false;
 
     // Notifications from showNow always play the notification sound, so the
     // countdown silences them from the start of the warning until the timer
@@ -89,6 +96,42 @@ namespace {
         return buf;
     }
 
+    // Short form for the overlay, e.g. "spsm ok, 3 s, wake 0x12".
+    std::string describeReport(const power::SleepReport &report) {
+        std::string text = power::pathName(report.path);
+        if (report.result == power::ResultNoResponse()) {
+            text += " no response";
+        } else if (R_FAILED(report.result)) {
+            text += " " + formatResult(report.result);
+        } else {
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), " ok, %lu s", report.elapsedSeconds);
+            text += buf;
+            if (report.hasWakeReason) {
+                std::snprintf(buf, sizeof(buf), ", wake 0x%X", report.wakeReason);
+                text += buf;
+            }
+        }
+        return text;
+    }
+
+    // One line per sleep attempt, so results survive the overlay being closed.
+    void appendLog(const power::SleepReport &report) {
+        ult::createDirectory(ConfigDir);
+        FILE *file = std::fopen(LogPath, "a");
+        if (!file)
+            return;
+
+        char stamp[32] = "?";
+        const time_t now = time(nullptr);
+        if (const tm *local = localtime(&now))
+            std::strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", local);
+
+        std::fprintf(file, "%s %s rc=0x%X elapsed=%lus wake=%s0x%X\n", stamp, power::pathName(report.path),
+                     report.result, report.elapsedSeconds, report.hasWakeReason ? "" : "n/a ", report.wakeReason);
+        std::fclose(file);
+    }
+
     std::string minutesLabel(u32 minutes) {
         return std::to_string(minutes) + " min";
     }
@@ -109,9 +152,14 @@ namespace {
             },
             .onExpire = [] {
                 endWarningEffects();
-                power::SleepPath path = power::SleepPath::None;
-                const Result rc = power::putSystemToSleep(g_config.sleepMethod, &path);
-                g_lastPath.store(path, std::memory_order_release);
+                power::SleepReport report;
+                const Result rc = power::putSystemToSleep(g_config.sleepMethod, &report);
+                appendLog(report);
+                {
+                    std::lock_guard lock(g_reportMutex);
+                    g_lastReport = report;
+                    g_haveReport = true;
+                }
                 return rc;
             },
         });
@@ -141,6 +189,12 @@ public:
         m_status = new tsl::elm::ListItem("Remaining", "");
         m_status->setClickListener([](u64) { return consumeWarning(); });
         list->addItem(m_status);
+
+        // Result of the last sleep attempt (route, time until the console came
+        // back, wake reason); also appended to sleep.log.
+        m_last = new tsl::elm::ListItem("Last sleep", "");
+        m_last->setClickListener([](u64) { return consumeWarning(); });
+        list->addItem(m_last);
 
         m_start = new tsl::elm::ListItem("Start", minutesLabel(g_config.durationMinutes));
         m_start->setClickListener([](u64 keys) {
@@ -260,9 +314,7 @@ private:
                 text = "Sleeping…";
                 break;
             case SleepTimer::State::Failed:
-                text = std::string(power::pathName(g_lastPath.load(std::memory_order_acquire))) + ": " +
-                       (g_timer.lastResult() == power::ResultNoResponse() ? std::string("no response")
-                                                                          : formatResult(g_timer.lastResult()));
+                text = "Failed, see below";
                 break;
             case SleepTimer::State::Missed:
                 text = "Expired during sleep";
@@ -276,9 +328,22 @@ private:
             m_statusText = text;
             m_status->setValue(text);
         }
+
+        std::string last = "\u2013";
+        {
+            std::lock_guard lock(g_reportMutex);
+            if (g_haveReport)
+                last = describeReport(g_lastReport);
+        }
+        if (last != m_lastText) {
+            m_lastText = last;
+            m_last->setValue(last);
+        }
     }
 
     tsl::elm::ListItem *m_status = nullptr;
+    tsl::elm::ListItem *m_last = nullptr;
+    std::string m_lastText;
     tsl::elm::ListItem *m_start = nullptr;
     std::string m_statusText;
 };

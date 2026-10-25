@@ -23,6 +23,9 @@ Open the overlay menu with its button combo (Ultrahand's default is `ZL + ZR + D
 Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 
 - **Remaining** shows the time left, `Not running`, or an error code.
+- **Last sleep** shows how the last sleep attempt went, e.g. `spsm ok, 3 s, wake 0x12`:
+  the route, seconds until the console was back, and the wake reason the system reported.
+  Every attempt is also appended to `/config/ovl-sleep-timer/sleep.log`.
 - **Start** begins the countdown with the duration shown next to it.
 - **Cancel** stops it.
 - **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+5 / −5 min** set the
@@ -95,7 +98,7 @@ one of these, chosen with `sleep_method` in `config.ini`:
 
 | `sleep_method`   | Request                          | Hardware result so far                              |
 |------------------|----------------------------------|-----------------------------------------------------|
-| `spsm` (default) | `spsm` cmd 1 `EnterSleep`        | Not yet tested (1.0.6)                              |
+| `spsm` (default) | `spsm` cmd 1 `EnterSleep`        | 1.0.6: returns success; screen goes off, video pauses, then the screen comes back on |
 | `omm`            | `omm` cmd 4 `EnterSleepAndWait`  | 1.0.4: screen went dark briefly, came back, no sleep; the call never returned |
 
 The fallback request runs on its own thread and is abandoned after 15 seconds. **Remaining**

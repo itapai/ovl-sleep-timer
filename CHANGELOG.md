@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.7] - 2026-10-25
+
+### Added
+- Sleep diagnostics: a **Last sleep** line shows the route, how long until the console was
+  back (steady clock, so time asleep counts) and spsm's last wake reason. Each attempt is
+  also appended to `/config/ovl-sleep-timer/sleep.log`.
 
 ### Removed
 - The one-second dim at the start of the last minute (not noticeable enough to be useful).
