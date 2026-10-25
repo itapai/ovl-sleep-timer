@@ -46,7 +46,9 @@ Result SleepTimer::start(u64 seconds, u64 warningSeconds) {
     join();
 
     m_deadline.store(nowSeconds() + seconds, std::memory_order_release);
-    m_warningSeconds.store(warningSeconds < seconds ? warningSeconds : 0, std::memory_order_release);
+    // A timer no longer than the warning window warns for all but its first second.
+    const u64 window = warningSeconds < seconds ? warningSeconds : (seconds > 1 ? seconds - 1 : 0);
+    m_warningSeconds.store(window, std::memory_order_release);
     m_lastResult.store(0, std::memory_order_release);
     ueventCreate(&m_stopEvent, false);
 

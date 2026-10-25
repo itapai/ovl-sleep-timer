@@ -17,8 +17,8 @@ namespace {
     constexpr const char *ConfigSection = "settings";
 
     constexpr u32 Presets[] = { 30, 60, 90, 120, 180 };
-    constexpr u32 StepMinutes = 5;
-    constexpr u32 MinMinutes = 5;
+    constexpr s32 Steps[] = { +1, -1, +5, -5 };
+    constexpr u32 MinMinutes = 1;
     constexpr u32 MaxMinutes = 600;
     constexpr u32 DefaultMinutes = 90;
     constexpr u64 WarningSeconds = 60;
@@ -178,20 +178,19 @@ public:
         auto *frame = new tsl::elm::OverlayFrame(APP_TITLE, APP_VERSION);
         auto *list = new tsl::elm::List();
 
+        // Note: libtesla calls click listeners every frame with that frame's
+        // keysDown, which is usually 0. Act only on an actual A press.
         list->addItem(new tsl::elm::CategoryHeader("Status"));
         m_status = new tsl::elm::ListItem("Remaining", "");
-        m_status->setClickListener([](u64) { return consumeWarning(); });
         list->addItem(m_status);
 
         // How the last sleep attempt went, e.g. "slept 12 min"; also appended
         // to sleep.log.
         m_last = new tsl::elm::ListItem("Last sleep", "");
-        m_last->setClickListener([](u64) { return consumeWarning(); });
         list->addItem(m_last);
 
         m_start = new tsl::elm::ListItem("Start", minutesLabel(g_config.durationMinutes));
         m_start->setClickListener([](u64 keys) {
-            if (consumeWarning()) return true;
             if (!(keys & KEY_A)) return false;
             saveConfig();
             g_timer.start(u64(g_config.durationMinutes) * 60, g_config.warning ? WarningSeconds : 0);
@@ -202,37 +201,32 @@ public:
 
         auto *cancel = new tsl::elm::ListItem("Cancel");
         cancel->setClickListener([](u64 keys) {
-            if (consumeWarning()) return true;
             if (!(keys & KEY_A)) return false;
-            g_timer.cancel();
-            endWarningEffects();
+            if (!consumeWarning()) {
+                g_timer.cancel();
+                endWarningEffects();
+            }
             return true;
         });
         list->addItem(cancel);
 
-        // While a timer runs these move its deadline (+5 during the warning acts
+        // While a timer runs these move its deadline (+ during the warning acts
         // as a snooze); otherwise they change the duration used by Start.
-        auto *plus = new tsl::elm::ListItem("+" + minutesLabel(StepMinutes));
-        plus->setClickListener([this](u64 keys) {
-            if (!(keys & KEY_A)) return consumeWarning();
-            step(+1);
-            return true;
-        });
-        list->addItem(plus);
-
-        auto *minus = new tsl::elm::ListItem("−" + minutesLabel(StepMinutes));
-        minus->setClickListener([this](u64 keys) {
-            if (!(keys & KEY_A)) return consumeWarning();
-            step(-1);
-            return true;
-        });
-        list->addItem(minus);
+        for (const s32 delta : Steps) {
+            const u32 magnitude = u32(delta < 0 ? -delta : delta);
+            auto *item = new tsl::elm::ListItem((delta > 0 ? "+" : "\u2212") + minutesLabel(magnitude));
+            item->setClickListener([this, delta](u64 keys) {
+                if (!(keys & KEY_A)) return false;
+                step(delta);
+                return true;
+            });
+            list->addItem(item);
+        }
 
         list->addItem(new tsl::elm::CategoryHeader("Duration"));
         for (const u32 minutes : Presets) {
             auto *preset = new tsl::elm::ListItem(minutesLabel(minutes));
             preset->setClickListener([this, minutes](u64 keys) {
-                if (consumeWarning()) return true;
                 if (!(keys & KEY_A)) return false;
                 setDuration(minutes);
                 return true;
@@ -250,9 +244,11 @@ public:
     }
 
     bool handleInput(u64 keysDown, u64, const HidTouchState &, HidAnalogStickState, HidAnalogStickState) override {
-        // A is left to the focused item's listener, which runs first; otherwise a
-        // +5 snooze during the warning would be cancelled in the same frame.
-        if ((keysDown & ALL_KEYS_MASK & ~KEY_A) && consumeWarning())
+        // During the warning, any button press cancels except A (left to the
+        // focused item, e.g. +5 as a snooze) and moving the cursor.
+        constexpr u64 Navigation = HidNpadButton_AnyUp | HidNpadButton_AnyDown |
+                                   HidNpadButton_AnyLeft | HidNpadButton_AnyRight;
+        if ((keysDown & ALL_KEYS_MASK & ~(KEY_A | Navigation)) && consumeWarning())
             return true;
 
         // Leaving the root menu returns to Ultrahand, which unloads this overlay
@@ -265,7 +261,7 @@ public:
     }
 
 private:
-    // Any input during the warning window cancels the timer.
+    // Cancels the timer if it is in the warning window.
     static bool consumeWarning() {
         if (g_timer.state() != SleepTimer::State::Warning)
             return false;
@@ -278,16 +274,15 @@ private:
         return true;
     }
 
-    void step(int direction) {
-        const s64 delta = s64(direction) * StepMinutes * 60;
+    void step(s32 deltaMinutes) {
         if (g_timer.active()) {
-            if (direction > 0 && g_timer.remaining() + StepMinutes * 60 > u64(MaxMinutes) * 60)
+            if (deltaMinutes > 0 && g_timer.remaining() + u64(deltaMinutes) * 60 > u64(MaxMinutes) * 60)
                 return;
-            g_timer.adjust(delta, MinRemainingSeconds);
+            g_timer.adjust(s64(deltaMinutes) * 60, MinRemainingSeconds);
             refreshStatus();
             return;
         }
-        setDuration(long(g_config.durationMinutes) + direction * long(StepMinutes));
+        setDuration(long(g_config.durationMinutes) + deltaMinutes);
     }
 
     void setDuration(long minutes) {

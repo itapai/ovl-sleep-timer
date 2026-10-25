@@ -29,19 +29,20 @@ Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
   appended to `/config/ovl-sleep-timer/sleep.log`.
 - **Start** begins the countdown with the duration shown next to it.
 - **Cancel** stops it.
-- **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+5 / −5 min** set the
-  duration Start uses (5–600 min).
-- **While a timer is running, +5 / −5 min change the time left** instead. −5 never takes it
-  below 1 minute, and +5 stops at 600 minutes. Presets still only change the duration for the
-  next Start.
+- **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+1 / −1 / +5 / −5 min** set
+  the duration Start uses (1–600 min).
+- **While a timer is running, the +/− buttons change the time left** instead. They never
+  take it below 1 minute or above 600 minutes. Presets still only change the duration for
+  the next Start.
 
 While a timer is running, **B hides the overlay** and doesn't close it, so the countdown
 keeps going. Press the overlay combo again to see the time left or to cancel.
 
 For the last minute, a notification counts down (`Sleeping in 0:59`, `0:58`, …). The
 countdown is silent: the overlay mutes its notification sound until the timer ends.
-Pressing any button in the open overlay during that minute cancels the timer, except
-**+5 min**, which adds 5 minutes instead (a snooze).
+With the overlay open during that minute, any button cancels the timer, except moving the
+cursor and pressing A on an item: **+1 / +5 min** add time instead (a snooze), and
+**Cancel** cancels.
 
 If you put the console to sleep yourself and wake it after the deadline, the timer does
 nothing and shows `Expired during sleep`. A sleep and wake that happen before the deadline
@@ -60,7 +61,7 @@ warning=true
 
 | Key                | Values         | Meaning                                    |
 |--------------------|----------------|--------------------------------------------|
-| `duration_minutes` | 5–600          | Last chosen duration, loaded on open       |
+| `duration_minutes` | 1–600          | Last chosen duration, loaded on open       |
 | `warning`          | `true`/`false` | Last-minute countdown notification         |
 
 The theme and wallpaper can be overridden in the same folder; see libultrahand's
