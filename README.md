@@ -58,6 +58,7 @@ warning=true
 |--------------------|----------------|--------------------------------------------|
 | `duration_minutes` | 5–600          | Last chosen duration, loaded on open       |
 | `warning`          | `true`/`false` | Last-minute countdown + one-second dim     |
+| `sleep_method`     | `spsm`/`omm`   | Fallback sleep route (advanced; never written by the overlay) |
 
 The theme and wallpaper can be overridden in the same folder; see libultrahand's
 `UI_OVERRIDE_PATH`.
@@ -89,14 +90,20 @@ does for `AppletType_OverlayApplet`:
 4. Closes all three sessions.
 
 **AM refuses step 1** on real hardware (1.0.0 showed `2128-0980`, i.e. `0x7A880`), because
-nx-ovlloader's process isn't one that AM launched as an applet. Since 1.0.1 the overlay then
-falls back to `omm` (the operation-mode manager) cmd 4 `EnterSleepAndWait`, passing a
-newly created event. If that fails too, **Remaining** shows the route and the code, e.g.
-`omm: 2xxx-yyyy (0x…)`. Please open an issue with it.
+nx-ovlloader's process isn't one that AM launched as an applet. The overlay then falls back to
+one of these, chosen with `sleep_method` in `config.ini`:
 
-Left out: the qlaunch general-channel message (message IDs unverified), `spsm` EnterSleep
-(skips AM's and omm's handling of the transition), and `PerformSystemButtonPressing`
-(needs a debug permission).
+| `sleep_method`   | Request                          | Hardware result so far                              |
+|------------------|----------------------------------|-----------------------------------------------------|
+| `spsm` (default) | `spsm` cmd 1 `EnterSleep`        | Not yet tested (1.0.6)                              |
+| `omm`            | `omm` cmd 4 `EnterSleepAndWait`  | 1.0.4: screen went dark briefly, came back, no sleep; the call never returned |
+
+The fallback request runs on its own thread and is abandoned after 15 seconds. **Remaining**
+then shows e.g. `spsm: no response` instead of hanging, and Cancel keeps working. Any other
+failure shows the route and code, e.g. `spsm: 2xxx-yyyy (0x…)`. Please open an issue with it.
+
+Left out: the qlaunch general-channel message (message IDs unverified) and
+`PerformSystemButtonPressing` (needs a debug permission).
 
 ### Test plan
 

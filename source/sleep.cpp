@@ -1,5 +1,7 @@
 #include "sleep.hpp"
 
+#include <atomic>
+
 namespace power {
 
     namespace {
@@ -13,6 +15,10 @@ namespace power {
 
         // omm (IOperationModeManager)
         constexpr u32 CmdEnterSleepAndWait = 4;
+        // spsm (ISystemManager)
+        constexpr u32 CmdSpsmEnterSleep = 1;
+
+        constexpr u64 FallbackTimeoutNs = 15'000'000'000ULL;
 
         // AM returns this while it is busy; libnx's appletInitialize retries on it.
         constexpr u32 AmBusyError = 0x19280;
@@ -86,10 +92,11 @@ namespace power {
             return rc;
         }
 
-        // Fallback for when AM refuses the overlay proxy (seen on hardware:
-        // 2128-0980). omm is the sysmodule that carries out the actual sleep
-        // transition. The event is handed over writable so omm can signal it;
-        // a waiter would get an invalid-handle error rather than block forever.
+        // omm is the sysmodule that drives the display/operation-mode side of
+        // sleep. On hardware (1.0.4) this turned the screen off briefly and then
+        // never returned, presumably waiting on AM, which didn't start the
+        // sequence. Kept as an opt-in method. The event is handed over writable
+        // so omm can signal it.
         Result startSleepViaOmm() {
             Service omm = {};
             Result rc = smGetService(&omm, "omm");
@@ -110,13 +117,77 @@ namespace power {
             return rc;
         }
 
+        // spsm is the power-state manager underneath omm; AM and omm learn about
+        // the transition through PSC like for any other sleep.
+        Result startSleepViaSpsm() {
+            Service *spsm = spsmGetServiceSession();
+            if (!serviceIsActive(spsm))
+                return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
+            return serviceDispatch(spsm, CmdSpsmEnterSleep);
+        }
+
+        // The fallback requests can block indefinitely (omm did), so they run on
+        // a helper thread and the caller gives up after a timeout. A helper that
+        // never returns is left behind; it dies with the overlay process.
+        struct Request {
+            SleepPath path;
+            Result result;
+            UEvent done;
+        };
+
+        Thread g_helper;
+        bool g_helperCreated = false;
+        std::atomic<bool> g_helperBusy{false};
+        Request g_request;
+
+        void helperEntry(void *) {
+            g_request.result = g_request.path == SleepPath::Omm ? startSleepViaOmm() : startSleepViaSpsm();
+            g_helperBusy.store(false, std::memory_order_release);
+            ueventSignal(&g_request.done);
+        }
+
+        Result runWithTimeout(SleepPath path, u64 timeoutNs) {
+            if (g_helperBusy.load(std::memory_order_acquire))
+                return ResultNoResponse(); // previous request is still stuck
+
+            if (g_helperCreated) {
+                threadWaitForExit(&g_helper);
+                threadClose(&g_helper);
+                g_helperCreated = false;
+            }
+
+            g_request.path = path;
+            g_request.result = 0;
+            ueventCreate(&g_request.done, false);
+
+            Result rc = threadCreate(&g_helper, helperEntry, nullptr, nullptr, 0x2000, 0x2c, -2);
+            if (R_FAILED(rc))
+                return rc;
+            g_helperCreated = true;
+            g_helperBusy.store(true, std::memory_order_release);
+
+            rc = threadStart(&g_helper);
+            if (R_FAILED(rc)) {
+                g_helperBusy.store(false, std::memory_order_release);
+                return rc;
+            }
+
+            if (R_FAILED(waitSingle(waiterForUEvent(&g_request.done), timeoutNs)))
+                return ResultNoResponse();
+            return g_request.result;
+        }
+
+    }
+
+    Result ResultNoResponse() {
+        return MAKERESULT(Module_Libnx, LibnxError_Timeout);
     }
 
     bool isSupported() {
         return hosversionAtLeast(15, 0, 0);
     }
 
-    Result putSystemToSleep(SleepPath *used) {
+    Result putSystemToSleep(SleepMethod method, SleepPath *used) {
         SleepPath path = SleepPath::LibnxApplet;
         Result rc = startSleepViaLibnx();
 
@@ -126,8 +197,8 @@ namespace power {
         }
 
         if (R_FAILED(rc)) {
-            path = SleepPath::Omm;
-            rc = startSleepViaOmm();
+            path = method == SleepMethod::Omm ? SleepPath::Omm : SleepPath::Spsm;
+            rc = runWithTimeout(path, FallbackTimeoutNs);
         }
 
         if (used)
@@ -171,6 +242,7 @@ namespace power {
             case SleepPath::LibnxApplet:  return "libnx applet";
             case SleepPath::OverlayProxy: return "overlay proxy";
             case SleepPath::Omm:          return "omm";
+            case SleepPath::Spsm:         return "spsm";
             default:                      return "none";
         }
     }

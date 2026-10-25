@@ -25,6 +25,7 @@ namespace {
     struct Config {
         u32 durationMinutes = DefaultMinutes;
         bool warning = true;
+        power::SleepMethod sleepMethod = power::SleepMethod::Spsm;
     };
 
     Config g_config;
@@ -66,6 +67,10 @@ namespace {
         const std::string warning = ult::parseValueFromIniSection(ConfigPath, ConfigSection, "warning");
         if (!warning.empty())
             g_config.warning = !(warning == "0" || warning == "false");
+
+        // Only read, never written: an advanced switch for testing sleep routes.
+        const std::string method = ult::parseValueFromIniSection(ConfigPath, ConfigSection, "sleep_method");
+        g_config.sleepMethod = method == "omm" ? power::SleepMethod::Omm : power::SleepMethod::Spsm;
     }
 
     void saveConfig() {
@@ -113,7 +118,7 @@ namespace {
             .onExpire = [] {
                 endWarningEffects();
                 power::SleepPath path = power::SleepPath::None;
-                const Result rc = power::putSystemToSleep(&path);
+                const Result rc = power::putSystemToSleep(g_config.sleepMethod, &path);
                 g_lastPath.store(path, std::memory_order_release);
                 return rc;
             },
@@ -265,7 +270,8 @@ private:
                 break;
             case SleepTimer::State::Failed:
                 text = std::string(power::pathName(g_lastPath.load(std::memory_order_acquire))) + ": " +
-                       formatResult(g_timer.lastResult());
+                       (g_timer.lastResult() == power::ResultNoResponse() ? std::string("no response")
+                                                                          : formatResult(g_timer.lastResult()));
                 break;
             case SleepTimer::State::Missed:
                 text = "Expired during sleep";

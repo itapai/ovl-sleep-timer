@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.6] - 2026-10-25
+
+### Changed
+- Sleep fallback is now `spsm` `EnterSleep`. The `omm` route from 1.0.1 dimmed the screen
+  briefly on hardware but never slept or returned; it can still be chosen with
+  `sleep_method=omm` in `config.ini`.
+
+### Fixed
+- A sleep request that never answers no longer leaves the overlay stuck on `Sleeping…`
+  (and would have frozen Cancel). It is abandoned after 15 s and shows `<route>: no response`.
+
 ## [1.0.5] - 2026-10-25
 
 ### Fixed
