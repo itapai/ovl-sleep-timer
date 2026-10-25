@@ -10,6 +10,7 @@ namespace power {
         None,
         LibnxApplet,    // libnx applet session (only if the host initialised one)
         OverlayProxy,   // appletAE -> OpenOverlayAppletProxy -> IGlobalStateController
+        Omm,            // omm EnterSleepAndWait, used when AM refuses the proxy
     };
 
     // True if the firmware has IGlobalStateController on the overlay applet proxy.

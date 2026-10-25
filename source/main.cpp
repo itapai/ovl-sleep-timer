@@ -15,8 +15,8 @@ namespace {
     constexpr const char *ConfigSection = "settings";
 
     constexpr u32 Presets[] = { 30, 60, 90, 120, 180 };
-    constexpr u32 StepMinutes = 15;
-    constexpr u32 MinMinutes = 15;
+    constexpr u32 StepMinutes = 5;
+    constexpr u32 MinMinutes = 5;
     constexpr u32 MaxMinutes = 600;
     constexpr u32 DefaultMinutes = 90;
     constexpr u64 WarningSeconds = 60;
@@ -28,6 +28,7 @@ namespace {
 
     Config g_config;
     SleepTimer g_timer;
+    std::atomic<power::SleepPath> g_lastPath{power::SleepPath::None};
 
     u32 clampMinutes(long minutes) {
         if (minutes < static_cast<long>(MinMinutes)) return MinMinutes;
@@ -59,7 +60,7 @@ namespace {
 
     std::string formatResult(Result rc) {
         char buf[48];
-        std::snprintf(buf, sizeof(buf), "Error %04u-%04u (0x%X)", 2000 + R_MODULE(rc), R_DESCRIPTION(rc), rc);
+        std::snprintf(buf, sizeof(buf), "%04u-%04u (0x%X)", 2000 + R_MODULE(rc), R_DESCRIPTION(rc), rc);
         return buf;
     }
 
@@ -75,7 +76,10 @@ namespace {
                 power::blinkBacklight();
             },
             .onExpire = [] {
-                return power::putSystemToSleep(nullptr);
+                power::SleepPath path = power::SleepPath::None;
+                const Result rc = power::putSystemToSleep(&path);
+                g_lastPath.store(path, std::memory_order_release);
+                return rc;
             },
         });
     }
@@ -136,7 +140,7 @@ public:
             list->addItem(preset);
         }
 
-        auto *plus = new tsl::elm::ListItem("+15 min");
+        auto *plus = new tsl::elm::ListItem("+" + minutesLabel(StepMinutes));
         plus->setClickListener([this](u64 keys) {
             if (consumeWarning()) return true;
             if (!(keys & KEY_A)) return false;
@@ -145,7 +149,7 @@ public:
         });
         list->addItem(plus);
 
-        auto *minus = new tsl::elm::ListItem("−15 min");
+        auto *minus = new tsl::elm::ListItem("−" + minutesLabel(StepMinutes));
         minus->setClickListener([this](u64 keys) {
             if (consumeWarning()) return true;
             if (!(keys & KEY_A)) return false;
@@ -204,7 +208,8 @@ private:
                 text = "Sleeping…";
                 break;
             case SleepTimer::State::Failed:
-                text = formatResult(g_timer.lastResult());
+                text = std::string(power::pathName(g_lastPath.load(std::memory_order_acquire))) + ": " +
+                       formatResult(g_timer.lastResult());
                 break;
             case SleepTimer::State::Missed:
                 text = "Expired during sleep";

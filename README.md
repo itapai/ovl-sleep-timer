@@ -25,8 +25,8 @@ Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 - **Remaining** shows the time left, `Not running`, or an error code.
 - **Start** begins the countdown with the duration shown next to it.
 - **Cancel** stops it.
-- **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+15 / −15 min** change the
-  duration (15–600 min). They do not restart a running timer; press Start again for that.
+- **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+5 / −5 min** change the
+  duration (5–600 min). They do not restart a running timer; press Start again for that.
 
 While a timer is running, **B hides the overlay** and doesn't close it, so the countdown
 keeps going. Press the overlay combo again to see the time left or to cancel.
@@ -51,7 +51,7 @@ warning=true
 
 | Key                | Values         | Meaning                                    |
 |--------------------|----------------|--------------------------------------------|
-| `duration_minutes` | 15–600         | Last chosen duration, loaded on open       |
+| `duration_minutes` | 5–600          | Last chosen duration, loaded on open       |
 | `warning`          | `true`/`false` | Notification + backlight blink at T−60 s   |
 
 The theme and wallpaper can be overridden in the same folder; see libultrahand's
@@ -64,7 +64,7 @@ The theme and wallpaper can be overridden in the same folder; see libultrahand's
   running, this overlay is unloaded and the timer is lost. Hide it with B or the combo
   instead. The way around this later is a sysmodule that holds the countdown, with this
   overlay as its front end (`source/timer.*` has no UI code, so it can be moved as-is).
-- **Not hardware-tested yet.** See below.
+- **Sleep route still being tested on hardware.** See below.
 
 ## How sleep is triggered
 
@@ -83,23 +83,25 @@ does for `AppletType_OverlayApplet`:
 3. `IGlobalStateController` cmd 2 `StartSleepSequence(u8 = 1)`
 4. Closes all three sessions.
 
-**AM may refuse step 1**, because nx-ovlloader's process isn't one that AM launched as an
-applet. If it does, the overlay shows `Error 2xxx-yyyy (0x…)` in **Remaining**. Please open
-an issue with that code. Fallbacks that were considered and left out: the qlaunch
-general-channel message (message IDs unverified), `spsm` EnterSleep (skips AM's bookkeeping
-for the foreground app), and `PerformSystemButtonPressing` (needs a debug permission).
+**AM refuses step 1** on real hardware (1.0.0 showed `2128-0980`, i.e. `0x7A880`), because
+nx-ovlloader's process isn't one that AM launched as an applet. Since 1.0.1 the overlay then
+falls back to `omm` (the operation-mode manager) cmd 4 `EnterSleepAndWait`, passing a
+newly created event. If that fails too, **Remaining** shows the route and the code, e.g.
+`omm: 2xxx-yyyy (0x…)`. Please open an issue with it.
+
+Left out: the qlaunch general-channel message (message IDs unverified), `spsm` EnterSleep
+(skips AM's and omm's handling of the transition), and `PerformSystemButtonPressing`
+(needs a debug permission).
 
 ### Test plan
 
-1. Set a 15 min timer (the minimum), hide the overlay, and check that the console sleeps
+1. Set a 5 min timer (the minimum), hide the overlay, and check that the console sleeps
    at 0:00:00 and the app resumes normally on wake.
 2. Repeat while the YouTube app is playing a video.
 3. Start a timer, sleep manually, and wake after the deadline: no second sleep, status
    `Expired during sleep`.
 4. Start/cancel several times and hide/show several times; then exit the overlay. There
    should be no crash or hang.
-
-For quicker testing, temporarily set `MinMinutes` in `source/main.cpp` to 1.
 
 ## Building
 

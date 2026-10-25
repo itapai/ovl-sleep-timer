@@ -50,6 +50,6 @@ jobs:
             (or copy `ovl-sleep-timer.ovl` to `/switch/.overlays/`), then reopen Ultrahand
             and pick **Sleep Timer** from the overlay list.
 
-            Requires firmware 15.0.0+. Not yet hardware-tested: if the console doesn't sleep,
+            Requires firmware 15.0.0+. Sleep route still being verified: if the console doesn't sleep,
             the overlay shows an error code under *Remaining*; please report it.
             See CHANGELOG.md for details.

@@ -11,6 +11,9 @@ namespace power {
         // IGlobalStateController
         constexpr u32 CmdStartSleepSequence = 2;
 
+        // omm (IOperationModeManager)
+        constexpr u32 CmdEnterSleepAndWait = 4;
+
         // AM returns this while it is busy; libnx's appletInitialize retries on it.
         constexpr u32 AmBusyError = 0x19280;
 
@@ -73,6 +76,30 @@ namespace power {
             return rc;
         }
 
+        // Fallback for when AM refuses the overlay proxy (seen on hardware:
+        // 2128-0980). omm is the sysmodule that carries out the actual sleep
+        // transition. The event is handed over writable so omm can signal it;
+        // a waiter would get an invalid-handle error rather than block forever.
+        Result startSleepViaOmm() {
+            Service omm = {};
+            Result rc = smGetService(&omm, "omm");
+            if (R_FAILED(rc))
+                return rc;
+
+            Event event = {};
+            rc = eventCreate(&event, false);
+            if (R_SUCCEEDED(rc)) {
+                rc = serviceDispatch(&omm, CmdEnterSleepAndWait,
+                    .in_num_handles = 1,
+                    .in_handles = { event.wevent },
+                );
+                eventClose(&event);
+            }
+
+            serviceClose(&omm);
+            return rc;
+        }
+
     }
 
     bool isSupported() {
@@ -86,6 +113,11 @@ namespace power {
         if (R_FAILED(rc)) {
             path = SleepPath::OverlayProxy;
             rc = startSleepViaOverlayProxy();
+        }
+
+        if (R_FAILED(rc)) {
+            path = SleepPath::Omm;
+            rc = startSleepViaOmm();
         }
 
         if (used)
@@ -113,6 +145,7 @@ namespace power {
         switch (path) {
             case SleepPath::LibnxApplet:  return "libnx applet";
             case SleepPath::OverlayProxy: return "overlay proxy";
+            case SleepPath::Omm:          return "omm";
             default:                      return "none";
         }
     }

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.1] - 2026-10-25
+
+### Fixed
+- Console did not sleep: AM refuses the overlay applet proxy (`2128-0980`). Sleep now
+  falls back to `omm` `EnterSleepAndWait`.
+
+### Changed
+- Duration adjust step and minimum are now 5 min (was 15).
+- A sleep error now shows which route failed, e.g. `omm: 2xxx-yyyy (0x…)`.
+
 ## [1.0.0] - 2026-10-25
 
 ### Added
