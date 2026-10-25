@@ -36,6 +36,9 @@ public:
 
     // Starts (or restarts) the countdown. warningSeconds == 0 disables the warning.
     Result start(u64 seconds, u64 warningSeconds);
+    // Moves the deadline of a running countdown by deltaSeconds, keeping at least
+    // minRemainingSeconds left when shortening. Returns false if not running.
+    bool adjust(s64 deltaSeconds, u64 minRemainingSeconds);
     // Stops the countdown and returns to Idle.
     void cancel();
     // Stops and joins the thread. Call before services the callbacks use go away.
