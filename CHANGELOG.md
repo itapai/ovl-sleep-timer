@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.0] - 2026-10-25
+
+### Changed
+- Simpler controls. One **Start / Stop** row replaces Remaining, Start, Cancel and the four
+  ± rows: A starts or stops, ◀ / ▶ change the duration (or the time left while running) by
+  5 min, and holding repeats. Durations snap to 1, 5, 10, 15 … 600 min.
+- **Quick start** presets (30 min … 3 h) start the timer right away instead of only setting
+  the duration; while a timer runs they restart it with that time.
+- The **Timer** header shows when the console will sleep (`Sleeps at 23:47`), or the error.
+- In the last minute, only **Stop** cancels the timer. Other buttons no longer cancel it.
+- `config.ini` is written when a timer starts or the overlay closes, not on every press.
+- CI builds with a pinned devkitPro image (`devkita64:20260219`).
+
+### Fixed
+- **B** in the last minute cancelled the timer instead of hiding the overlay.
+
+### Removed
+- **Last sleep**, `sleep.log`, and the 30 s sleep check behind them (debug features). Stopping
+  the timer or closing the overlay while it said `Sleeping…` could freeze it for up to 30 s.
+- The ±1 min buttons; 1 min is still available as the shortest duration.
+
 ## [1.1.1] - 2026-10-25
 
 ### Fixed

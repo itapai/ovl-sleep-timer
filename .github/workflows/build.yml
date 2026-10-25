@@ -18,7 +18,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: devkitpro/devkita64:latest
+    container: devkitpro/devkita64:20260219 # pinned so a toolchain update cannot silently change builds
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,5 +50,5 @@ jobs:
             (or copy `ovl-sleep-timer.ovl` to `/switch/.overlays/`), then reopen Ultrahand
             and pick **Sleep Timer** from the overlay list.
 
-            Requires firmware 15.0.0+. If the console doesn't sleep, the overlay shows what
-            happened under *Last sleep*; please report it. See CHANGELOG.md for details.
+            Requires firmware 15.0.0+. If the console doesn't sleep, the overlay shows the
+            error code next to *Timer*; please report it. See CHANGELOG.md for details.

@@ -23,26 +23,33 @@ then reboot or reopen the overlay menu.
 Open the overlay menu with its button combo (Ultrahand's default is `ZL + ZR + D-Pad Down`,
 Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 
-- **Remaining** shows the time left, `Not running`, or an error code.
-- **Last sleep** shows how the last timer ended: `slept 42 min` (how long the console
-  slept before you woke it), `no sleep seen`, or an error code. Every attempt is also
-  appended to `/config/ovl-sleep-timer/sleep.log`.
-- **Start** begins the countdown with the duration shown next to it.
-- **Cancel** stops it.
-- **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+1 / −1 / +5 / −5 min** set
-  the duration Start uses (1–600 min).
-- **While a timer is running, the +/− buttons change the time left** instead. They never
-  take it below 1 minute or above 600 minutes. Presets still only change the duration for
-  the next Start.
+```
+▌Timer             Sleeps at 23:47
+  Stop                 ◀ 1:23:45 ▶
+▌Quick start
+  30 min
+  1 h
+  1 h 30 min
+  2 h
+  3 h
+```
 
-While a timer is running, **B hides the overlay** and doesn't close it, so the countdown
-keeps going. Press the overlay combo again to see the time left or to cancel.
+| Control | No timer | Timer running |
+|---|---|---|
+| **A** on the top row | Start with the duration shown | Stop |
+| **◀ / ▶** on the top row | Duration −/+ 5 min (hold to repeat) | Time left −/+ 5 min |
+| **A** on a Quick start row | Start with that time | Restart with that time |
+| **B** | Close the overlay | Hide the overlay; the timer keeps going |
+
+- The **Timer** header shows `Off`, `Sleeps at 23:47` (local time), or what went wrong:
+  `Sleep failed: 2xxx-yyyy` or `Expired during sleep`.
+- Durations go 1, 5, 10, 15 … 600 min. The time left never goes below 1 minute or above
+  600 minutes.
+- Press the overlay combo again to see the time left or to stop the timer.
 
 For the last minute, a notification counts down (`Sleeping in 0:59`, `0:58`, …). The
-countdown is silent: the overlay mutes its notification sound until the timer ends.
-With the overlay open during that minute, any button cancels the timer, except moving the
-cursor and pressing A on an item: **+1 / +5 min** add time instead (a snooze), and
-**Cancel** cancels.
+countdown is silent: the overlay mutes its notification sound until the timer ends. To snooze,
+open the overlay and press **▶** (+5 min); to cancel, press **A** on **Stop**.
 
 If you put the console to sleep yourself and wake it after the deadline, the timer does
 nothing and shows `Expired during sleep`. A sleep and wake that happen before the deadline
@@ -50,8 +57,8 @@ don't delay it, because the countdown uses the system's steady clock, not a coun
 
 ## Configuration
 
-`/config/ovl-sleep-timer/config.ini` is created the first time you change the duration or
-start the timer:
+`/config/ovl-sleep-timer/config.ini` is written when you start a timer or close the overlay
+after changing the duration:
 
 ```ini
 [settings]
@@ -81,8 +88,7 @@ When the timer ends, the overlay presses the power button for 150 ms through the
 service (`hid:dbg` cmd 121 `SetSleepButtonAutoPilotState`), releases it, and removes the
 override so the real button keeps working. AM sees an ordinary short press and the HOME
 menu runs its normal sleep sequence, so the app is suspended and resumed as usual and you
-get the lock screen on wake. The overlay then watches the steady clock for 30 s; a jump
-means the console slept, and its size is the time asleep.
+get the lock screen on wake.
 
 Routes that were tried on hardware and don't work from an overlay:
 
@@ -107,7 +113,7 @@ make
 Or with Docker:
 
 ```sh
-docker run --rm -v "$PWD:/src" -w /src devkitpro/devkita64 make
+docker run --rm -v "$PWD:/src" -w /src devkitpro/devkita64:20260219 make
 ```
 
 The output is `ovl-sleep-timer.ovl`, also copied to `out/switch/.overlays/`. CI builds
