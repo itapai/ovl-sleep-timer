@@ -30,6 +30,7 @@ namespace {
     Config g_config;
     SleepTimer g_timer;
     std::atomic<power::SleepPath> g_lastPath{power::SleepPath::None};
+    std::atomic<u32> g_warningTicks{0};
 
     u32 clampMinutes(long minutes) {
         if (minutes < static_cast<long>(MinMinutes)) return MinMinutes;
@@ -72,11 +73,24 @@ namespace {
     void configureTimer() {
         g_timer.setCallbacks({
             .onWarning = [] {
-                if (tsl::notification)
-                    tsl::notification->show("Sleeping in 1 minute. Open the overlay to cancel.", 24, 20, "", "Sleep Timer", 5000);
-                power::blinkBacklight();
+                g_warningTicks.store(0, std::memory_order_release);
+                power::beginDim();
+            },
+            .onWarningTick = [](u64 remaining) {
+                // The dim lasts one tick (about a second).
+                if (g_warningTicks.fetch_add(1, std::memory_order_acq_rel) == 1)
+                    power::endDim();
+
+                // showNow replaces its own previous toast in place, so this reads
+                // as one notification counting down rather than a stack of them.
+                if (tsl::notification) {
+                    char text[32];
+                    std::snprintf(text, sizeof(text), "Sleeping in %lu:%02lu", remaining / 60, remaining % 60);
+                    tsl::notification->showNow(text, 24, "Sleep Timer", 1500, false);
+                }
             },
             .onExpire = [] {
+                power::endDim();
                 power::SleepPath path = power::SleepPath::None;
                 const Result rc = power::putSystemToSleep(&path);
                 g_lastPath.store(path, std::memory_order_release);
@@ -189,8 +203,11 @@ private:
         if (g_timer.state() != SleepTimer::State::Warning)
             return false;
         g_timer.cancel();
-        if (tsl::notification)
+        power::endDim();
+        if (tsl::notification) {
+            tsl::notification->dismissFront(); // the countdown toast
             tsl::notification->show("Sleep timer cancelled.", 24, 20, "", "Sleep Timer", 2000);
+        }
         return true;
     }
 
@@ -200,6 +217,7 @@ private:
             if (direction > 0 && g_timer.remaining() + StepMinutes * 60 > u64(MaxMinutes) * 60)
                 return;
             g_timer.adjust(delta, MinRemainingSeconds);
+            power::endDim();
             refreshStatus();
             return;
         }
@@ -256,6 +274,7 @@ public:
 
     void exitServices() override {
         g_timer.shutdown();
+        power::endDim();
         if (m_timeInitialized)
             timeExit();
     }

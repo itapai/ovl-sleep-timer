@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.4] - 2026-10-25
+
+### Changed
+- The warning dims the screen for a second (to a fifth of the current brightness) instead
+  of switching the backlight off.
+
+### Added
+- Countdown notification for the last minute (`Sleeping in 0:59`, `0:58`, …), updated in
+  place every second.
+
 ## [1.0.3] - 2026-10-25
 
 ### Changed
