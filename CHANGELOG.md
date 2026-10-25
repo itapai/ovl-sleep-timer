@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.5] - 2026-10-25
+
+### Fixed
+- The last-minute countdown played the notification sound every second. Notifications are
+  now silent from the start of the countdown until the timer ends.
+
 ## [1.0.4] - 2026-10-25
 
 ### Changed

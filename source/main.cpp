@@ -32,6 +32,26 @@ namespace {
     std::atomic<power::SleepPath> g_lastPath{power::SleepPath::None};
     std::atomic<u32> g_warningTicks{0};
 
+    // Notifications from showNow always play the notification sound, so the
+    // countdown silences them from the start of the warning until the timer
+    // ends. Ultrahand reads this setting only at startup.
+    std::atomic<bool> g_silencing{false};
+    bool g_savedSilence = false;
+
+    void beginQuietCountdown() {
+        if (!g_silencing.exchange(true, std::memory_order_acq_rel)) {
+            g_savedSilence = ult::silenceNotifications;
+            ult::silenceNotifications = true;
+        }
+    }
+
+    // Undoes everything the warning changed: brightness and notification sound.
+    void endWarningEffects() {
+        power::endDim();
+        if (g_silencing.exchange(false, std::memory_order_acq_rel))
+            ult::silenceNotifications = g_savedSilence;
+    }
+
     u32 clampMinutes(long minutes) {
         if (minutes < static_cast<long>(MinMinutes)) return MinMinutes;
         if (minutes > static_cast<long>(MaxMinutes)) return MaxMinutes;
@@ -74,6 +94,7 @@ namespace {
         g_timer.setCallbacks({
             .onWarning = [] {
                 g_warningTicks.store(0, std::memory_order_release);
+                beginQuietCountdown();
                 power::beginDim();
             },
             .onWarningTick = [](u64 remaining) {
@@ -90,7 +111,7 @@ namespace {
                 }
             },
             .onExpire = [] {
-                power::endDim();
+                endWarningEffects();
                 power::SleepPath path = power::SleepPath::None;
                 const Result rc = power::putSystemToSleep(&path);
                 g_lastPath.store(path, std::memory_order_release);
@@ -130,6 +151,7 @@ public:
             if (!(keys & KEY_A)) return false;
             saveConfig();
             g_timer.start(u64(g_config.durationMinutes) * 60, g_config.warning ? WarningSeconds : 0);
+            endWarningEffects(); // from a previous run that was snoozed
             return true;
         });
         list->addItem(m_start);
@@ -139,6 +161,7 @@ public:
             if (consumeWarning()) return true;
             if (!(keys & KEY_A)) return false;
             g_timer.cancel();
+            endWarningEffects();
             return true;
         });
         list->addItem(cancel);
@@ -203,7 +226,7 @@ private:
         if (g_timer.state() != SleepTimer::State::Warning)
             return false;
         g_timer.cancel();
-        power::endDim();
+        endWarningEffects();
         if (tsl::notification) {
             tsl::notification->dismissFront(); // the countdown toast
             tsl::notification->show("Sleep timer cancelled.", 24, 20, "", "Sleep Timer", 2000);
@@ -274,7 +297,7 @@ public:
 
     void exitServices() override {
         g_timer.shutdown();
-        power::endDim();
+        endWarningEffects();
         if (m_timeInitialized)
             timeExit();
     }
