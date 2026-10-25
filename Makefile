@@ -41,7 +41,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 #---------------------------------------------------------------------------------
 APP_TITLE	:= Sleep Timer
 APP_AUTHOR	:= itapai
-APP_VERSION	:= 1.0.4
+APP_VERSION	:= 1.1.0
 TARGET		:= ovl-sleep-timer
 BUILD		:= build
 SOURCES		:= source

@@ -1,33 +1,24 @@
-// Entering sleep mode and the pre-sleep warning. No UI code here.
+// Entering sleep mode. No UI code here.
 #pragma once
 
 #include <switch.h>
 
 namespace power {
 
-    // Which route putSystemToSleep() used, for display in the overlay.
-    enum class SleepPath {
-        None,
-        LibnxApplet,    // libnx applet session (only if the host initialised one)
-        OverlayProxy,   // appletAE -> OpenOverlayAppletProxy -> IGlobalStateController
-        Omm,            // omm EnterSleepAndWait, used when AM refuses the proxy
+    // How the last putSystemToSleep() call went.
+    struct SleepReport {
+        Result result = 0;          // result of the button press
+        bool slept = false;         // the console was seen to sleep afterwards
+        u64 sleptSeconds = 0;       // how long it slept, if it did
     };
 
-    // True if the firmware has IGlobalStateController on the overlay applet proxy.
+    // True on the firmware this overlay supports.
     bool isSupported();
 
-    // Runs IGlobalStateController::StartSleepSequence(true), the same sequence
-    // qlaunch runs on a power-button press. Returns the Result of the last
-    // attempt; *used names the path that succeeded (or the last one tried).
-    Result putSystemToSleep(SleepPath *used);
-
-    // Drops the screen brightness to a fifth of the current setting without
-    // saving it. Best effort; does nothing if already dimmed.
-    void beginDim();
-    // Restores the brightness saved by beginDim(). Safe to call at any time
-    // and from any thread.
-    void endDim();
-
-    const char *pathName(SleepPath path);
+    // Presses the power button briefly, which makes the system run its normal
+    // sleep sequence, then watches for up to ~30 s to see whether the console
+    // actually slept. Returns once the console is awake again (or the watch
+    // ends) with the outcome in *report.
+    Result putSystemToSleep(SleepReport *report);
 
 }

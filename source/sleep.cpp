@@ -4,109 +4,48 @@ namespace power {
 
     namespace {
 
-        // IAllSystemAppletProxiesService (appletAE)
-        constexpr u32 CmdOpenOverlayAppletProxy = 300;
-        // IOverlayAppletProxy [15.0.0+]
-        constexpr u32 CmdGetGlobalStateController = 23;
-        // IGlobalStateController
-        constexpr u32 CmdStartSleepSequence = 2;
+        // A short press sleeps; a long one opens the power menu.
+        constexpr u64 ButtonPressNs = 150'000'000ULL;
+        constexpr u64 ButtonReleaseNs = 100'000'000ULL;
 
-        // omm (IOperationModeManager)
-        constexpr u32 CmdEnterSleepAndWait = 4;
+        // After the press, how long to watch for the sleep, and how big a jump
+        // in the steady clock between one-second polls counts as "was asleep".
+        constexpr u64 WatchSeconds = 30;
+        constexpr u64 SuspendGapSeconds = 5;
+        constexpr u64 PollNs = 1'000'000'000ULL;
 
-        // AM returns this while it is busy; libnx's appletInitialize retries on it.
-        constexpr u32 AmBusyError = 0x19280;
-
-        // Warning dim: brightness setting is multiplied by this, then restored.
-        constexpr float DimFactor = 0.2f;
-        bool g_dimmed = false;
-        float g_savedBrightness = 0.f;
-
-        Mutex &dimMutex() {
-            static Mutex mutex = 0;
-            return mutex;
+        // The standard steady clock keeps counting while the console sleeps.
+        u64 steadySeconds() {
+            TimeSteadyClockTimePoint point;
+            if (serviceIsActive(timeGetServiceSession_SteadyClock()) &&
+                R_SUCCEEDED(timeGetStandardSteadyClockTimePoint(&point)) && point.time_point >= 0)
+                return static_cast<u64>(point.time_point);
+            return armTicksToNs(armGetSystemTick()) / 1'000'000'000ULL;
         }
 
-        Result startSleepViaLibnx() {
-            // libtesla sets __nx_applet_type = AppletType_None, so this session is
-            // normally not initialised. Kept in case a host ever provides one.
-            if (!serviceIsActive(appletGetServiceSession_GlobalStateController()))
-                return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
-
-            return appletStartSleepSequence(true);
-        }
-
-        // Opens IGlobalStateController the way libnx's appletInitialize() does for
-        // AppletType_OverlayApplet, calls StartSleepSequence and closes everything.
-        // nx-ovlloader is a plain sysmodule (not registered with AM as an applet),
-        // so AM may refuse the proxy; the Result says so.
-        Result startSleepViaOverlayProxy() {
-            Service ae = {}, proxy = {}, globalState = {};
-
-            Result rc = smGetService(&ae, "appletAE");
+        // The overlay runs inside nx-ovlloader, which AM doesn't treat as an
+        // applet, so it can't call IGlobalStateController::StartSleepSequence
+        // (AM answers 2128-0980), and asking spsm or omm directly only blanks
+        // the screen for a second. Instead, hid:dbg overrides the sleep-button
+        // state that AM watches through hid:sys: AM sees an ordinary short press
+        // of the power button and qlaunch runs its own sleep sequence. The
+        // override is always removed, or the real button would stop working.
+        Result pressPowerButton() {
+            Result rc = hiddbgInitialize();
             if (R_FAILED(rc))
                 return rc;
 
-            rc = serviceConvertToDomain(&ae);
-
+            HiddbgSleepButtonAutoPilotState state = { .buttons = 1 };
+            rc = hiddbgSetSleepButtonAutoPilotState(&state);
             if (R_SUCCEEDED(rc)) {
-                for (int attempt = 0; attempt < 20; attempt++) {
-                    const u64 reserved = 0;
-                    serviceAssumeDomain(&ae);
-                    rc = serviceDispatchIn(&ae, CmdOpenOverlayAppletProxy, reserved,
-                        .in_send_pid = true,
-                        .in_num_handles = 1,
-                        .in_handles = { CUR_PROCESS_HANDLE },
-                        .out_num_objects = 1,
-                        .out_objects = &proxy,
-                    );
-                    if (R_VALUE(rc) != AmBusyError)
-                        break;
-                    svcSleepThread(100'000'000ULL);
-                }
+                svcSleepThread(ButtonPressNs);
+                state.buttons = 0;
+                hiddbgSetSleepButtonAutoPilotState(&state);
+                svcSleepThread(ButtonReleaseNs);
             }
+            hiddbgUnsetSleepButtonAutoPilotState();
 
-            if (R_SUCCEEDED(rc)) {
-                serviceAssumeDomain(&proxy);
-                rc = serviceDispatch(&proxy, CmdGetGlobalStateController,
-                    .out_num_objects = 1,
-                    .out_objects = &globalState,
-                );
-            }
-
-            if (R_SUCCEEDED(rc)) {
-                const u8 flag = 1; // official software hard-codes true
-                serviceAssumeDomain(&globalState);
-                rc = serviceDispatchIn(&globalState, CmdStartSleepSequence, flag);
-            }
-
-            serviceClose(&globalState);
-            serviceClose(&proxy);
-            serviceClose(&ae);
-            return rc;
-        }
-
-        // Fallback for when AM refuses the overlay proxy (seen on hardware:
-        // 2128-0980). omm is the sysmodule that carries out the actual sleep
-        // transition. The event is handed over writable so omm can signal it;
-        // a waiter would get an invalid-handle error rather than block forever.
-        Result startSleepViaOmm() {
-            Service omm = {};
-            Result rc = smGetService(&omm, "omm");
-            if (R_FAILED(rc))
-                return rc;
-
-            Event event = {};
-            rc = eventCreate(&event, false);
-            if (R_SUCCEEDED(rc)) {
-                rc = serviceDispatch(&omm, CmdEnterSleepAndWait,
-                    .in_num_handles = 1,
-                    .in_handles = { event.wevent },
-                );
-                eventClose(&event);
-            }
-
-            serviceClose(&omm);
+            hiddbgExit();
             return rc;
         }
 
@@ -116,63 +55,30 @@ namespace power {
         return hosversionAtLeast(15, 0, 0);
     }
 
-    Result putSystemToSleep(SleepPath *used) {
-        SleepPath path = SleepPath::LibnxApplet;
-        Result rc = startSleepViaLibnx();
+    Result putSystemToSleep(SleepReport *report) {
+        SleepReport result;
+        result.result = pressPowerButton();
 
-        if (R_FAILED(rc)) {
-            path = SleepPath::OverlayProxy;
-            rc = startSleepViaOverlayProxy();
-        }
-
-        if (R_FAILED(rc)) {
-            path = SleepPath::Omm;
-            rc = startSleepViaOmm();
-        }
-
-        if (used)
-            *used = path;
-        return rc;
-    }
-
-    void beginDim() {
-        Mutex &lock = dimMutex();
-        mutexLock(&lock);
-
-        if (!g_dimmed && R_SUCCEEDED(lblInitialize())) {
-            float current = 0.f;
-            if (R_SUCCEEDED(lblGetCurrentBrightnessSetting(&current)) &&
-                R_SUCCEEDED(lblSetCurrentBrightnessSetting(current * DimFactor))) {
-                g_savedBrightness = current;
-                g_dimmed = true;
-            } else {
-                lblExit();
+        if (R_SUCCEEDED(result.result)) {
+            // This thread is suspended along with everything else while the
+            // console sleeps, so the sleep shows up as one large jump.
+            u64 last = steadySeconds();
+            const u64 until = last + WatchSeconds;
+            while (last < until) {
+                svcSleepThread(PollNs);
+                const u64 now = steadySeconds();
+                if (now > last + SuspendGapSeconds) {
+                    result.slept = true;
+                    result.sleptSeconds = now - last;
+                    break;
+                }
+                last = now;
             }
         }
 
-        mutexUnlock(&lock);
-    }
-
-    void endDim() {
-        Mutex &lock = dimMutex();
-        mutexLock(&lock);
-
-        if (g_dimmed) {
-            lblSetCurrentBrightnessSetting(g_savedBrightness);
-            lblExit();
-            g_dimmed = false;
-        }
-
-        mutexUnlock(&lock);
-    }
-
-    const char *pathName(SleepPath path) {
-        switch (path) {
-            case SleepPath::LibnxApplet:  return "libnx applet";
-            case SleepPath::OverlayProxy: return "overlay proxy";
-            case SleepPath::Omm:          return "omm";
-            default:                      return "none";
-        }
+        if (report)
+            *report = result;
+        return result.result;
     }
 
 }

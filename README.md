@@ -4,7 +4,8 @@ Tesla/Ultrahand overlay that puts the Switch to sleep after a set time — for w
 
 The built-in auto-sleep only counts idle time, stops at 30 minutes in handheld mode, and
 video apps switch it off. This overlay counts down from a duration you pick and then
-runs the same sleep sequence as a press of the power button, whatever app is open.
+presses the power button for you, so the console goes to sleep exactly as if you had
+pressed it, whatever app is open.
 
 ## Requirements
 
@@ -23,6 +24,9 @@ Open the overlay menu with its button combo (Ultrahand's default is `ZL + ZR + D
 Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 
 - **Remaining** shows the time left, `Not running`, or an error code.
+- **Last sleep** shows how the last timer ended: `slept 42 min` (how long the console
+  slept before you woke it), `no sleep seen`, or an error code. Every attempt is also
+  appended to `/config/ovl-sleep-timer/sleep.log`.
 - **Start** begins the countdown with the duration shown next to it.
 - **Cancel** stops it.
 - **Duration** presets (30 / 60 / 90 / 120 / 180 min) and **+5 / −5 min** set the
@@ -34,9 +38,10 @@ Tesla's is `L + D-Pad Down + R-Stick`) and choose **Sleep Timer**.
 While a timer is running, **B hides the overlay** and doesn't close it, so the countdown
 keeps going. Press the overlay combo again to see the time left or to cancel.
 
-For the last minute, a notification counts down (`Sleeping in 0:59`, `0:58`, …), and the
-screen dims for about a second when it starts. Pressing any button in the open overlay during that minute cancels the timer,
-except **+5 min**, which adds 5 minutes instead (a snooze).
+For the last minute, a notification counts down (`Sleeping in 0:59`, `0:58`, …). The
+countdown is silent: the overlay mutes its notification sound until the timer ends.
+Pressing any button in the open overlay during that minute cancels the timer, except
+**+5 min**, which adds 5 minutes instead (a snooze).
 
 If you put the console to sleep yourself and wake it after the deadline, the timer does
 nothing and shows `Expired during sleep`. A sleep and wake that happen before the deadline
@@ -56,7 +61,7 @@ warning=true
 | Key                | Values         | Meaning                                    |
 |--------------------|----------------|--------------------------------------------|
 | `duration_minutes` | 5–600          | Last chosen duration, loaded on open       |
-| `warning`          | `true`/`false` | Last-minute countdown + one-second dim     |
+| `warning`          | `true`/`false` | Last-minute countdown notification         |
 
 The theme and wallpaper can be overridden in the same folder; see libultrahand's
 `UI_OVERRIDE_PATH`.
@@ -68,44 +73,25 @@ The theme and wallpaper can be overridden in the same folder; see libultrahand's
   running, this overlay is unloaded and the timer is lost. Hide it with B or the combo
   instead. The way around this later is a sysmodule that holds the countdown, with this
   overlay as its front end (`source/timer.*` has no UI code, so it can be moved as-is).
-- **Sleep route still being tested on hardware.** See below.
 
 ## How sleep is triggered
 
-On expiry the overlay calls `IGlobalStateController::StartSleepSequence(true)` (libnx:
-`appletStartSleepSequence`), which is what qlaunch calls when the power button is pressed.
-AM exposes that interface to overlay applets on 15.0.0+.
+When the timer ends, the overlay presses the power button for 150 ms through the debug HID
+service (`hid:dbg` cmd 121 `SetSleepButtonAutoPilotState`), releases it, and removes the
+override so the real button keeps working. AM sees an ordinary short press and the HOME
+menu runs its normal sleep sequence, so the app is suspended and resumed as usual and you
+get the lock screen on wake. The overlay then watches the steady clock for 30 s; a jump
+means the console slept, and its size is the time asleep.
 
-libtesla/libultrahand overlays run with `__nx_applet_type = AppletType_None` inside
-nx-ovlloader, which is a regular sysmodule. So libnx never opens an applet session for the
-overlay. `source/sleep.cpp` therefore opens one itself, the way libnx's `appletInitialize()`
-does for `AppletType_OverlayApplet`:
+Routes that were tried on hardware and don't work from an overlay:
 
-1. `appletAE` → domain → cmd 300 `OpenOverlayAppletProxy` (sends PID and process handle;
-   retries while AM reports busy)
-2. `IOverlayAppletProxy` cmd 23 `GetGlobalStateController`
-3. `IGlobalStateController` cmd 2 `StartSleepSequence(u8 = 1)`
-4. Closes all three sessions.
+| Route | Result |
+|---|---|
+| `IGlobalStateController::StartSleepSequence` via `appletAE` cmd 300 `OpenOverlayAppletProxy` (what the HOME menu itself calls) | AM refuses: `2128-0980`. nx-ovlloader isn't a process AM launched as an applet. |
+| `omm` cmd 4 `EnterSleepAndWait` | Screen off for 1–2 s, then back on; the call never returns. |
+| `spsm` cmd 1 `EnterSleep` | Returns at once; screen off for 1–2 s, then back on. |
 
-**AM refuses step 1** on real hardware (1.0.0 showed `2128-0980`, i.e. `0x7A880`), because
-nx-ovlloader's process isn't one that AM launched as an applet. Since 1.0.1 the overlay then
-falls back to `omm` (the operation-mode manager) cmd 4 `EnterSleepAndWait`, passing a
-newly created event. If that fails too, **Remaining** shows the route and the code, e.g.
-`omm: 2xxx-yyyy (0x…)`. Please open an issue with it.
-
-Left out: the qlaunch general-channel message (message IDs unverified), `spsm` EnterSleep
-(skips AM's and omm's handling of the transition), and `PerformSystemButtonPressing`
-(needs a debug permission).
-
-### Test plan
-
-1. Set a 5 min timer (the minimum), hide the overlay, and check that the console sleeps
-   at 0:00:00 and the app resumes normally on wake.
-2. Repeat while the YouTube app is playing a video.
-3. Start a timer, sleep manually, and wake after the deadline: no second sleep, status
-   `Expired during sleep`.
-4. Start/cancel several times and hide/show several times; then exit the overlay. There
-   should be no crash or hang.
+Both direct requests start a sleep that backs out, presumably because AM didn't start it.
 
 ## Building
 

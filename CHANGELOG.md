@@ -1,5 +1,57 @@
 # Changelog
 
+## [1.1.0] - 2026-10-25
+
+First version confirmed on hardware to put the console to sleep.
+
+### Changed
+- Sleep works by simulating a short power-button press (`hid:dbg`), so the HOME menu runs
+  its normal sleep sequence. Confirmed on hardware: the screen stays off until the power
+  button is pressed, and the console wakes to the lock screen.
+- **Last sleep** now shows how long the console actually slept (`slept 42 min`), or
+  `no sleep seen`, measured on the steady clock after the press. `sleep.log` records the same.
+
+### Removed
+- The routes that didn't work on hardware (AM overlay proxy, `spsm`, `omm`), the
+  `sleep_method` setting, the 15 s request timeout they needed, and the wake-reason readout.
+
+## [1.0.8] - 2026-10-25
+
+### Changed
+- New default sleep route `button`: a simulated short press of the power button through
+  `hid:dbg`, so AM and the HOME menu run their own sleep sequence. On hardware, `spsm`
+  returned at once and backed out of sleep after 1–2 s; it stays available as
+  `sleep_method=spsm`, as does `omm`.
+- After a button press the overlay waits 5 s before recording **Last sleep**, so a real
+  sleep shows up as a long time there.
+
+## [1.0.7] - 2026-10-25
+
+### Added
+- Sleep diagnostics: a **Last sleep** line shows the route, how long until the console was
+  back (steady clock, so time asleep counts) and spsm's last wake reason. Each attempt is
+  also appended to `/config/ovl-sleep-timer/sleep.log`.
+
+### Removed
+- The one-second dim at the start of the last minute (not noticeable enough to be useful).
+
+## [1.0.6] - 2026-10-25
+
+### Changed
+- Sleep fallback is now `spsm` `EnterSleep`. The `omm` route from 1.0.1 dimmed the screen
+  briefly on hardware but never slept or returned; it can still be chosen with
+  `sleep_method=omm` in `config.ini`.
+
+### Fixed
+- A sleep request that never answers no longer leaves the overlay stuck on `Sleeping…`
+  (and would have frozen Cancel). It is abandoned after 15 s and shows `<route>: no response`.
+
+## [1.0.5] - 2026-10-25
+
+### Fixed
+- The last-minute countdown played the notification sound every second. Notifications are
+  now silent from the start of the countdown until the timer ends.
+
 ## [1.0.4] - 2026-10-25
 
 ### Changed

@@ -3,6 +3,8 @@
 #include <tesla.hpp>
 
 #include <cstdio>
+#include <ctime>
+#include <mutex>
 #include <string>
 
 #include "sleep.hpp"
@@ -29,8 +31,31 @@ namespace {
 
     Config g_config;
     SleepTimer g_timer;
-    std::atomic<power::SleepPath> g_lastPath{power::SleepPath::None};
-    std::atomic<u32> g_warningTicks{0};
+    constexpr const char *LogPath = "sdmc:/config/ovl-sleep-timer/sleep.log";
+
+    // Written by the timer thread on expiry, read by the UI.
+    std::mutex g_reportMutex;
+    power::SleepReport g_lastReport;
+    bool g_haveReport = false;
+
+    // Notifications from showNow always play the notification sound, so the
+    // countdown silences them from the start of the warning until the timer
+    // ends. Ultrahand reads this setting only at startup.
+    std::atomic<bool> g_silencing{false};
+    bool g_savedSilence = false;
+
+    void beginQuietCountdown() {
+        if (!g_silencing.exchange(true, std::memory_order_acq_rel)) {
+            g_savedSilence = ult::silenceNotifications;
+            ult::silenceNotifications = true;
+        }
+    }
+
+    // Undoes what the warning changed (the notification sound setting).
+    void endWarningEffects() {
+        if (g_silencing.exchange(false, std::memory_order_acq_rel))
+            ult::silenceNotifications = g_savedSilence;
+    }
 
     u32 clampMinutes(long minutes) {
         if (minutes < static_cast<long>(MinMinutes)) return MinMinutes;
@@ -66,6 +91,40 @@ namespace {
         return buf;
     }
 
+    // Short form for the overlay, e.g. "slept 12 min".
+    std::string describeReport(const power::SleepReport &report) {
+        if (R_FAILED(report.result))
+            return "error " + formatResult(report.result);
+        if (!report.slept)
+            return "no sleep seen";
+
+        char buf[32];
+        if (report.sleptSeconds < 60)
+            std::snprintf(buf, sizeof(buf), "slept %lu s", report.sleptSeconds);
+        else if (report.sleptSeconds < 3600)
+            std::snprintf(buf, sizeof(buf), "slept %lu min", report.sleptSeconds / 60);
+        else
+            std::snprintf(buf, sizeof(buf), "slept %lu h %lu min", report.sleptSeconds / 3600, (report.sleptSeconds / 60) % 60);
+        return buf;
+    }
+
+    // One line per sleep attempt, so results survive the overlay being closed.
+    void appendLog(const power::SleepReport &report) {
+        ult::createDirectory(ConfigDir);
+        FILE *file = std::fopen(LogPath, "a");
+        if (!file)
+            return;
+
+        char stamp[32] = "?";
+        const time_t now = time(nullptr);
+        if (const tm *local = localtime(&now))
+            std::strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", local);
+
+        std::fprintf(file, "%s rc=0x%X slept=%s seconds=%lu\n", stamp, report.result,
+                     report.slept ? "yes" : "no", report.sleptSeconds);
+        std::fclose(file);
+    }
+
     std::string minutesLabel(u32 minutes) {
         return std::to_string(minutes) + " min";
     }
@@ -73,14 +132,9 @@ namespace {
     void configureTimer() {
         g_timer.setCallbacks({
             .onWarning = [] {
-                g_warningTicks.store(0, std::memory_order_release);
-                power::beginDim();
+                beginQuietCountdown();
             },
             .onWarningTick = [](u64 remaining) {
-                // The dim lasts one tick (about a second).
-                if (g_warningTicks.fetch_add(1, std::memory_order_acq_rel) == 1)
-                    power::endDim();
-
                 // showNow replaces its own previous toast in place, so this reads
                 // as one notification counting down rather than a stack of them.
                 if (tsl::notification) {
@@ -90,10 +144,15 @@ namespace {
                 }
             },
             .onExpire = [] {
-                power::endDim();
-                power::SleepPath path = power::SleepPath::None;
-                const Result rc = power::putSystemToSleep(&path);
-                g_lastPath.store(path, std::memory_order_release);
+                endWarningEffects();
+                power::SleepReport report;
+                const Result rc = power::putSystemToSleep(&report);
+                appendLog(report);
+                {
+                    std::lock_guard lock(g_reportMutex);
+                    g_lastReport = report;
+                    g_haveReport = true;
+                }
                 return rc;
             },
         });
@@ -124,12 +183,19 @@ public:
         m_status->setClickListener([](u64) { return consumeWarning(); });
         list->addItem(m_status);
 
+        // How the last sleep attempt went, e.g. "slept 12 min"; also appended
+        // to sleep.log.
+        m_last = new tsl::elm::ListItem("Last sleep", "");
+        m_last->setClickListener([](u64) { return consumeWarning(); });
+        list->addItem(m_last);
+
         m_start = new tsl::elm::ListItem("Start", minutesLabel(g_config.durationMinutes));
         m_start->setClickListener([](u64 keys) {
             if (consumeWarning()) return true;
             if (!(keys & KEY_A)) return false;
             saveConfig();
             g_timer.start(u64(g_config.durationMinutes) * 60, g_config.warning ? WarningSeconds : 0);
+            endWarningEffects(); // from a previous run that was snoozed
             return true;
         });
         list->addItem(m_start);
@@ -139,6 +205,7 @@ public:
             if (consumeWarning()) return true;
             if (!(keys & KEY_A)) return false;
             g_timer.cancel();
+            endWarningEffects();
             return true;
         });
         list->addItem(cancel);
@@ -203,7 +270,7 @@ private:
         if (g_timer.state() != SleepTimer::State::Warning)
             return false;
         g_timer.cancel();
-        power::endDim();
+        endWarningEffects();
         if (tsl::notification) {
             tsl::notification->dismissFront(); // the countdown toast
             tsl::notification->show("Sleep timer cancelled.", 24, 20, "", "Sleep Timer", 2000);
@@ -217,7 +284,6 @@ private:
             if (direction > 0 && g_timer.remaining() + StepMinutes * 60 > u64(MaxMinutes) * 60)
                 return;
             g_timer.adjust(delta, MinRemainingSeconds);
-            power::endDim();
             refreshStatus();
             return;
         }
@@ -241,8 +307,7 @@ private:
                 text = "Sleeping…";
                 break;
             case SleepTimer::State::Failed:
-                text = std::string(power::pathName(g_lastPath.load(std::memory_order_acquire))) + ": " +
-                       formatResult(g_timer.lastResult());
+                text = "Failed, see below";
                 break;
             case SleepTimer::State::Missed:
                 text = "Expired during sleep";
@@ -256,9 +321,22 @@ private:
             m_statusText = text;
             m_status->setValue(text);
         }
+
+        std::string last = "\u2013";
+        {
+            std::lock_guard lock(g_reportMutex);
+            if (g_haveReport)
+                last = describeReport(g_lastReport);
+        }
+        if (last != m_lastText) {
+            m_lastText = last;
+            m_last->setValue(last);
+        }
     }
 
     tsl::elm::ListItem *m_status = nullptr;
+    tsl::elm::ListItem *m_last = nullptr;
+    std::string m_lastText;
     tsl::elm::ListItem *m_start = nullptr;
     std::string m_statusText;
 };
@@ -274,7 +352,7 @@ public:
 
     void exitServices() override {
         g_timer.shutdown();
-        power::endDim();
+        endWarningEffects();
         if (m_timeInitialized)
             timeExit();
     }
